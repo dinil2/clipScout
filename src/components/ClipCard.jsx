@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
-import { Copy, Check, Play, Download, Loader2, Flame, Zap, Compass, Hash, Sparkles } from 'lucide-react';
+import { 
+  Copy, Check, Play, Download, Loader2, Flame, Zap, 
+  Compass, Hash, Sparkles, MessageSquare, Video, 
+  CheckCircle2, Clock, AlertCircle, Smile, Trophy
+} from 'lucide-react';
 import { formatDurationBadge } from '../utils/youtube';
 
-export default function ClipCard({ clip, rank, videoId, onNotify }) {
+export default function ClipCard({ 
+  clip, 
+  rank, 
+  videoId, 
+  onNotify, 
+  status = 'todo', 
+  onStatusChange 
+}) {
   const [copiedField, setCopiedField] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadDone, setIsDownloadDone] = useState(false);
+  const [showInlinePlayer, setShowInlinePlayer] = useState(false);
 
   const triggerCopy = (text, fieldName, label) => {
     navigator.clipboard.writeText(text);
@@ -17,11 +29,24 @@ export default function ClipCard({ clip, rank, videoId, onNotify }) {
   };
 
   const handleCopyAll = () => {
-    const fullPackage = `${clip.title}
+    const fullPackage = `🎬 TITLE:
+${clip.title}
 
+⚡ ON-SCREEN HOOK OVERLAY:
+"${clip.hookText || clip.title}"
+
+📝 SHORTS DESCRIPTION:
 ${clip.description}
 
-${clip.hashtags.join(' ')}`;
+🏷️ HASHTAGS:
+${clip.hashtags.join(' ')}
+
+💬 PINNED COMMENT:
+"${clip.pinnedComment || 'What do you think about this? Comment below! 👇'}"
+
+⏱️ TIMESTAMPS:
+${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
+
     triggerCopy(fullPackage, 'all', 'full Shorts package');
   };
 
@@ -68,7 +93,7 @@ ${clip.hashtags.join(' ')}`;
         badgeBg: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
         ring: 'border-emerald-500/40 text-emerald-400',
         icon: Flame,
-        tier: 'High Virality Potential'
+        tier: 'Viral Tier 1 (High Algorithm Push)'
       };
     }
     if (score >= 50) {
@@ -76,35 +101,84 @@ ${clip.hashtags.join(' ')}`;
         badgeBg: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
         ring: 'border-amber-500/40 text-amber-400',
         icon: Zap,
-        tier: 'Solid Viral Potential'
+        tier: 'Viral Tier 2 (Solid Potential)'
       };
     }
     return {
       badgeBg: 'bg-zinc-800/80 border-zinc-700 text-zinc-400',
       ring: 'border-zinc-600 text-zinc-400',
       icon: Compass,
-      tier: 'Moderate / Niche'
+      tier: 'Niche / Community Beat'
+    };
+  };
+
+  // Category Badge visual styling
+  const getCategoryBadge = (category = '') => {
+    const cat = category.toLowerCase();
+    if (cat.includes('controversy') || cat.includes('debate')) {
+      return {
+        icon: Flame,
+        style: 'bg-red-500/10 text-red-400 border-red-500/30',
+        label: 'Controversy & Debate'
+      };
+    }
+    if (cat.includes('comedy') || cat.includes('rage')) {
+      return {
+        icon: Smile,
+        style: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30',
+        label: 'Comedy & Rage'
+      };
+    }
+    if (cat.includes('mindset') || cat.includes('advice') || cat.includes('insight')) {
+      return {
+        icon: Sparkles,
+        style: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+        label: 'Mindset & Advice'
+      };
+    }
+    if (cat.includes('twist') || cat.includes('drama')) {
+      return {
+        icon: AlertCircle,
+        style: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+        label: 'Plot Twist & Drama'
+      };
+    }
+    return {
+      icon: Trophy,
+      style: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+      label: clip.category || 'Peak Climax'
     };
   };
 
   const scoreMeta = getScoreStyle(clip.viralityScore);
   const ScoreIcon = scoreMeta.icon;
+  const categoryMeta = getCategoryBadge(clip.category);
+  const CategoryIcon = categoryMeta.icon;
 
   return (
-    <article className="glass-card rounded-2xl p-5 sm:p-6 relative group transition-all duration-200">
+    <article 
+      id={clip.id || `clip-${rank}`}
+      className="glass-card rounded-2xl p-5 sm:p-6 relative group transition-all duration-200 hover:border-studio-600 scroll-mt-24"
+    >
       
-      {/* Top Header: Rank, Timestamps, and Virality Badge */}
+      {/* Top Header: Rank, Category, Timestamps, and Virality Badge */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-studio-800">
         
-        {/* Left: Rank & Monospace Timestamp */}
-        <div className="flex items-center flex-wrap gap-3">
+        {/* Left: Rank & Monospace Timestamp & Category */}
+        <div className="flex items-center flex-wrap gap-2.5">
           <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold font-mono ${
             rank === 1 ? 'bg-amber-500 text-studio-950 shadow-md shadow-amber-500/20' : 'bg-studio-800 text-zinc-300'
           }`}>
             #{rank}
           </span>
 
-          <div className="flex items-center gap-2 font-mono text-sm sm:text-base font-semibold text-zinc-200 bg-studio-850 px-3 py-1.5 rounded-xl border border-studio-700/80">
+          {/* Category Badge */}
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-semibold border ${categoryMeta.style}`}>
+            <CategoryIcon className="w-3.5 h-3.5" />
+            <span>{categoryMeta.label}</span>
+          </span>
+
+          <div className="flex items-center gap-2 font-mono text-sm sm:text-base font-semibold text-zinc-200 bg-studio-850 px-3 py-1 rounded-xl border border-studio-700/80">
             <span>{clip.startTime}</span>
             <span className="text-zinc-500">→</span>
             <span>{clip.endTime}</span>
@@ -113,49 +187,47 @@ ${clip.hashtags.join(' ')}`;
             </span>
           </div>
 
-          {/* YouTube Preview Link */}
-          <a
-            href={clip.previewUrl || `https://youtu.be/${videoId}?t=${clip.startSeconds}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 text-xs font-medium transition hover:border-red-500/40"
-            title="Open video at this timestamp in new tab"
-          >
-            <Play className="w-3.5 h-3.5 fill-current" />
-            <span>▶ Preview on YouTube</span>
-          </a>
-
-          {/* Download 1080p Clip Button */}
-          <button
-            type="button"
-            onClick={handleDownloadClip}
-            disabled={isDownloading}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition active:scale-95 ${
-              isDownloading
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 cursor-wait'
-                : isDownloadDone
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                : 'bg-studio-800 hover:bg-studio-750 text-amber-300 hover:text-amber-200 border-studio-700 hover:border-amber-500/40'
-            }`}
-            title={`Download this ${clip.durationSeconds}s slice in 1080p MP4`}
-          >
-            {isDownloading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                <span>Clipping 1080p...</span>
-              </>
-            ) : isDownloadDone ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Downloaded!</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5 text-amber-400" />
-                <span>Download 1080p</span>
-              </>
-            )}
-          </button>
+          {/* Workflow Status Tracker */}
+          {onStatusChange && (
+            <div className="flex items-center gap-1 bg-studio-900 border border-studio-750 rounded-xl p-0.5 text-[11px] font-medium">
+              <button
+                type="button"
+                onClick={() => onStatusChange(clip.id, 'todo')}
+                className={`px-2 py-1 rounded-lg transition ${
+                  status === 'todo'
+                    ? 'bg-amber-500/20 text-amber-300 font-semibold'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+                title="Mark as To Edit"
+              >
+                To Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => onStatusChange(clip.id, 'ready')}
+                className={`px-2 py-1 rounded-lg transition ${
+                  status === 'ready'
+                    ? 'bg-blue-500/20 text-blue-300 font-semibold'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+                title="Mark as Ready to Post"
+              >
+                Ready
+              </button>
+              <button
+                type="button"
+                onClick={() => onStatusChange(clip.id, 'posted')}
+                className={`px-2 py-1 rounded-lg transition ${
+                  status === 'posted'
+                    ? 'bg-emerald-500/20 text-emerald-300 font-semibold'
+                    : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+                title="Mark as Posted"
+              >
+                Posted
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Right: AI Virality Score Badge & Caption */}
@@ -165,15 +237,90 @@ ${clip.hashtags.join(' ')}`;
             <span>{clip.viralityScore}</span>
             <span className="text-xs opacity-75 font-normal">/ 100</span>
             <span className="text-xs font-medium ml-1 border-l border-current/20 pl-2">
-              AI Virality Score
+              Virality Score
             </span>
           </div>
           <span className="text-[10px] text-zinc-500 mt-1 sm:text-right font-normal">
-            AI estimate based on hook & story beat, not a guarantee
+            {scoreMeta.tier}
           </span>
         </div>
 
       </div>
+
+      {/* Action Buttons Bar: Inline Player Toggle, Preview on YouTube, 1080p Download */}
+      <div className="mt-3.5 flex items-center flex-wrap gap-2.5">
+        {/* Inline YouTube Player Toggle */}
+        <button
+          type="button"
+          onClick={() => setShowInlinePlayer(!showInlinePlayer)}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition border ${
+            showInlinePlayer
+              ? 'bg-amber-500 text-studio-950 border-amber-400 shadow-md shadow-amber-500/20'
+              : 'bg-studio-800 hover:bg-studio-750 text-amber-300 hover:text-amber-200 border-studio-700'
+          }`}
+          title="Watch exact clip slice inside this page"
+        >
+          <Video className="w-3.5 h-3.5" />
+          <span>{showInlinePlayer ? 'Hide Player' : '▶ Watch Clip Inline'}</span>
+        </button>
+
+        {/* YouTube External Preview Link */}
+        <a
+          href={clip.previewUrl || `https://youtu.be/${videoId}?t=${clip.startSeconds}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-600/10 hover:bg-red-600/20 text-red-400 border border-red-500/20 text-xs font-medium transition hover:border-red-500/40"
+          title="Open video at this timestamp in new YouTube tab"
+        >
+          <Play className="w-3.5 h-3.5 fill-current" />
+          <span>Open on YouTube</span>
+        </a>
+
+        {/* Download 1080p Clip Button */}
+        <button
+          type="button"
+          onClick={handleDownloadClip}
+          disabled={isDownloading}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition active:scale-95 ${
+            isDownloading
+              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 cursor-wait'
+              : isDownloadDone
+              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+              : 'bg-studio-850 hover:bg-studio-800 text-zinc-200 hover:text-white border-studio-700 hover:border-amber-500/40'
+          }`}
+          title={`Download this ${clip.durationSeconds}s slice in 1080p MP4`}
+        >
+          {isDownloading ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+              <span>Clipping 1080p...</span>
+            </>
+          ) : isDownloadDone ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Downloaded 1080p!</span>
+            </>
+          ) : (
+            <>
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Download 1080p</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Embedded Inline YouTube Player */}
+      {showInlinePlayer && (
+        <div className="mt-4 rounded-xl overflow-hidden bg-black border border-studio-700 shadow-2xl aspect-video animate-fade-in">
+          <iframe
+            src={`https://www.youtube-nocookie.com/embed/${videoId}?start=${clip.startSeconds}&end=${clip.endSeconds}&autoplay=1&rel=0`}
+            title={`Preview: ${clip.title}`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            className="w-full h-full border-0"
+          />
+        </div>
+      )}
 
       {/* Main Body */}
       <div className="mt-4 space-y-3.5">
@@ -205,6 +352,76 @@ ${clip.hashtags.join(' ')}`;
             </p>
           )}
         </div>
+
+        {/* ⚡ 3-Second On-Screen Hook Overlay Box */}
+        {clip.hookText && (
+          <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 block">
+                  3-Second Hook Overlay (Put in Video Editor)
+                </span>
+                <span className="text-xs sm:text-sm font-semibold text-white">
+                  "{clip.hookText}"
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => triggerCopy(clip.hookText, 'hook', 'hook overlay')}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold transition shrink-0 self-start sm:self-auto"
+              title="Copy hook overlay text for CapCut / Premiere"
+            >
+              {copiedField === 'hook' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Hook</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* 💬 High-Engagement Pinned Comment Box */}
+        {clip.pinnedComment && (
+          <div className="bg-blue-500/10 border border-blue-500/25 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <MessageSquare className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-300 block">
+                  High-Engagement Pinned Comment (Drives Algorithm Push)
+                </span>
+                <span className="text-xs sm:text-sm text-zinc-200">
+                  "{clip.pinnedComment}"
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => triggerCopy(clip.pinnedComment, 'pinned', 'pinned comment')}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-xs font-semibold transition shrink-0 self-start sm:self-auto"
+              title="Copy pinned comment"
+            >
+              {copiedField === 'pinned' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Comment</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Description & Copy */}
         <div className="bg-studio-900/80 rounded-xl p-3 border border-studio-800/80">
@@ -288,7 +505,7 @@ ${clip.hashtags.join(' ')}`;
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
               : 'bg-studio-800 hover:bg-studio-700 text-zinc-100 hover:text-white border border-studio-700'
           }`}
-          title="Copies Title, Description, and Hashtags in one formatted block"
+          title="Copies Title, Hook, Description, Hashtags, and Pinned Comment in one formatted block"
         >
           {copiedField === 'all' ? (
             <>
@@ -298,7 +515,7 @@ ${clip.hashtags.join(' ')}`;
           ) : (
             <>
               <Copy className="w-4 h-4 text-amber-400" />
-              <span>Copy All (Title + Desc + Tags)</span>
+              <span>Copy All (Title + Hook + Desc + Tags)</span>
             </>
           )}
         </button>

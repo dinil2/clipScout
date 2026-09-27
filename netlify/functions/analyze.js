@@ -35,10 +35,10 @@ function parseTimestamp(timestamp) {
 }
 
 /**
- * Condenses transcript to <= targetMaxWords (~900 words / ~1200 tokens)
- * to stay safely within Groq's 8,000 TPM limit on free tier.
+ * Condenses transcript to <= targetMaxWords (~2200 words / ~2900 tokens)
+ * Samples evenly across 100% of the timeline so the end is never cut off.
  */
-function condenseTranscript(items, targetMaxWords = 900) {
+function condenseTranscript(items, targetMaxWords = 2200) {
   if (!items || items.length === 0) return '';
 
   // 1. Clean items
@@ -97,26 +97,25 @@ function condenseTranscript(items, targetMaxWords = 900) {
     return blocks.map(b => `[${formatSeconds(b.start)}] ${b.text}`).join('\n');
   }
 
-  // 4. Sample evenly across timeline
-  const step = Math.ceil(totalWords / targetMaxWords);
-  const sampled = [];
-  let wordCount = 0;
+  // 4. Sample evenly across 100% of the timeline without breaking early
+  const avgWordsPerBlock = Math.max(1, totalWords / blocks.length);
+  const maxSampledBlocks = Math.max(20, Math.floor(targetMaxWords / avgWordsPerBlock));
+  const step = (blocks.length - 1) / Math.max(1, maxSampledBlocks - 1);
+  const sampledIndices = new Set();
 
-  for (let i = 0; i < blocks.length; i += step) {
-    const b = blocks[i];
-    const bWords = b.text.split(/\s+/).length;
-    if (wordCount + bWords > targetMaxWords) break;
-    sampled.push(`[${formatSeconds(b.start)}] ${b.text}`);
-    wordCount += bWords;
+  for (let i = 0; i < maxSampledBlocks; i++) {
+    const idx = Math.min(blocks.length - 1, Math.round(i * step));
+    sampledIndices.add(idx);
   }
 
-  return sampled.join('\n');
+  const sortedIndices = Array.from(sampledIndices).sort((a, b) => a - b);
+  return sortedIndices.map(idx => `[${formatSeconds(blocks[idx].start)}] ${blocks[idx].text}`).join('\n');
 }
 
 /**
- * Attempts to extract stream duration from YouTube watch page
+ * Extracts stream duration, description, and chapters from YouTube watch page
  */
-async function fetchStreamDuration(videoId) {
+async function fetchStreamDetails(videoId) {
   try {
     const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
@@ -124,20 +123,52 @@ async function fetchStreamDuration(videoId) {
         'Accept-Language': 'en-US,en;q=0.9'
       }
     });
-    if (!res.ok) return 7200; // fallback 2 hours
+    if (!res.ok) return { durationSec: 7200, description: '', chapters: [] };
     const html = await res.text();
-    const match = html.match(/\"approxDurationMs\":\"(\d+)\"/);
-    if (match) {
-      return Math.floor(parseInt(match[1]) / 1000);
+    
+    let durationSec = 7200;
+    const durMatch = html.match(/"approxDurationMs":"(\d+)"/);
+    if (durMatch) {
+      durationSec = Math.floor(parseInt(durMatch[1]) / 1000);
+    } else {
+      const lenMatch = html.match(/"lengthSeconds":"(\d+)"/);
+      if (lenMatch) {
+        durationSec = parseInt(lenMatch[1]);
+      }
     }
-    const lenMatch = html.match(/\"lengthSeconds\":\"(\d+)\"/);
-    if (lenMatch) {
-      return parseInt(lenMatch[1]);
+
+    // YouTube hard maximum video limit is 12 hours (43,200s); cap infinite 24/7 streams to 4 hours (14,400s)
+    if (durationSec > 43200) {
+      durationSec = 14400;
     }
+
+    let description = '';
+    const descMatch = html.match(/"shortDescription":"(.*?)"/s);
+    if (descMatch) {
+      description = descMatch[1]
+        .replace(/\\n/g, '\n')
+        .replace(/\\"/g, '"')
+        .replace(/\\r/g, '')
+        .trim();
+    }
+
+    // Extract potential chapters/timestamps from description
+    const chapters = [];
+    if (description) {
+      const lines = description.split('\n');
+      for (const line of lines) {
+        const timeMatch = line.match(/(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/);
+        if (timeMatch && line.length < 120) {
+          chapters.push(line.trim());
+        }
+      }
+    }
+
+    return { durationSec, description, chapters };
   } catch (err) {
-    console.warn('Failed to scrape stream duration:', err.message);
+    console.warn('Failed to scrape stream details:', err.message);
+    return { durationSec: 7200, description: '', chapters: [] };
   }
-  return 7200;
 }
 
 /**
@@ -155,10 +186,10 @@ async function generateShortsClips(prompt) {
   }
 
   if (useGroq) {
+    // openai/gpt-oss-120b supports full 8000 TPM with no restrictive OTPM cap, returning up to 15 clips reliably
     const candidateModels = [
       'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b',
-      'qwen/qwen3.8-27b'
+      'openai/gpt-oss-20b'
     ];
 
     let lastError = null;
@@ -177,9 +208,9 @@ async function generateShortsClips(prompt) {
               messages: [
                 {
                   role: 'system',
-                  content: `You are an elite YouTube Shorts producer and algorithm specialist.
+                  content: `You are an elite YouTube Shorts producer, virality algorithm specialist, and video editor.
 Identify viral, hook-driven, self-contained moments (15 to 58 seconds) from video content.
-Always output valid JSON conforming strictly to the requested schema with 6 to 8 clips.`
+Always output valid JSON conforming strictly to the requested schema with 12 to 15 viral clips.`
                 },
                 {
                   role: 'user',
@@ -187,6 +218,7 @@ Always output valid JSON conforming strictly to the requested schema with 6 to 8
                 }
               ],
               response_format: { type: 'json_object' },
+              max_tokens: 3600,
               temperature: 0.3
             })
           });
@@ -361,14 +393,21 @@ export const handler = async (event) => {
       const lastItem = normalizedTranscript[normalizedTranscript.length - 1];
       totalDurationSec = Math.ceil(lastItem.offset + lastItem.duration);
 
-      // Smart transcript condensing to stay strictly under token limits
-      const condensed = condenseTranscript(normalizedTranscript, 900);
+      // Smart transcript condensing to stay strictly under token limits (up to 2200 words)
+      const condensed = condenseTranscript(normalizedTranscript, 2200);
 
-      prompt = `You are an elite YouTube Shorts editor.
+      prompt = `You are an elite YouTube Shorts virality algorithm specialist and video editor.
 Analyze this timed transcript from "${metadata.title}" by "${metadata.author}" (Duration: ${formatSeconds(totalDurationSec)}).
 
-Extract 6 to 8 candidate Shorts moments (each strictly 15 to 58 seconds).
-Choose moments with strong 3-second hooks, punchlines/emotional peaks, and complete self-contained thoughts.
+Extract exactly 15 candidate viral Shorts moments (each strictly 15 to 58 seconds).
+Choose moments distributed across the entire video timeline from beginning to end with strong 3-second hooks, punchlines/emotional peaks, and complete self-contained thoughts.
+
+CRITICAL RULES:
+1. Return exactly 15 candidate clips.
+2. Every clip MUST be strictly between 15 and 58 seconds long (never exceed 58s).
+3. Timestamps must be in "mm:ss" or "hh:mm:ss" and fall within 00:00 and ${formatSeconds(totalDurationSec)}.
+4. Ensure clips span the entire video timeline: early, mid, late, and climax sections.
+5. Provide high-converting titles (under 60 chars), descriptions, 3-5 hashtags, virality scores (0-100), categories, on-screen 3-second hook text overlays, and engaging pinned comment questions.
 
 REQUIRED JSON FORMAT:
 {
@@ -376,10 +415,13 @@ REQUIRED JSON FORMAT:
     {
       "startTime": "mm:ss",
       "endTime": "mm:ss",
-      "title": "string under 60 chars, hook-driven",
+      "title": "Hook-driven title under 60 chars",
       "description": "1-2 sentence YouTube Shorts description",
       "hashtags": ["#tag1", "#tag2", "#tag3"],
-      "viralityScore": 85,
+      "viralityScore": 92,
+      "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
+      "hookText": "Exact 3-second on-screen text overlay for editor",
+      "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
       "reasoning": "one sentence on why this moment works"
     }
   ]
@@ -391,22 +433,35 @@ ${condensed}`;
     } else {
       // 3. Fallback: Livestream / No Captions Pacing Engine
       isLivestreamArc = true;
-      totalDurationSec = await fetchStreamDuration(videoId);
+      const streamDetails = await fetchStreamDetails(videoId);
+      totalDurationSec = streamDetails.durationSec || 7200;
 
-      prompt = `You are an elite YouTube Shorts editor and virality analyst.
-The user wants to find the best moments to cut into YouTube Shorts from this YouTube livestream/video:
+      const chaptersContext = streamDetails.chapters.length > 0 
+        ? `\nStream Chapters / Timestamps:\n${streamDetails.chapters.slice(0, 25).join('\n')}\n`
+        : '';
+      const descContext = streamDetails.description 
+        ? `\nStream Description Context:\n${streamDetails.description.slice(0, 400)}\n`
+        : '';
+
+      prompt = `You are an elite YouTube Shorts editor and virality algorithm specialist.
+The user wants to find the best 15 moments to cut into YouTube Shorts from this YouTube livestream/video:
 Title: "${metadata.title}"
 Creator: "${metadata.author}"
-Total Duration: ${formatSeconds(totalDurationSec)} (${totalDurationSec} seconds)
+Total Duration: ${formatSeconds(totalDurationSec)} (${totalDurationSec} seconds)${chaptersContext}${descContext}
 
 NOTE: Closed captions are not yet available from YouTube for this stream.
-Based on the creator's style, the title/challenge ("${metadata.title}"), and typical high-energy livestream story arcs (e.g. initial challenge hook, early escalation, mid-stream twist, peak confrontation/hype, climax, payoff), scout 6 to 8 high-energy peak moments across the stream timeline.
+Based on the creator's style, the title/challenge ("${metadata.title}"), and typical high-converting livestream story arcs, scout exactly 15 high-energy peak moments across the entire stream timeline.
 
 CRITICAL RULES:
-1. Every clip MUST be 15 to 58 seconds long (never exceed 58s).
-2. Timestamps must be in "mm:ss" or "hh:mm:ss" (if over 1 hour) and must fall strictly within 00:00 and ${formatSeconds(totalDurationSec)}.
-3. Spread the moments strategically across early, mid, and climax phases of the duration.
-4. Generate high-converting hook titles (under 60 chars), 1-2 sentence descriptions, 3-5 hashtags, virality scores (0-100), and reasoning.
+1. Provide exactly 15 candidate clips.
+2. Every clip MUST be 15 to 58 seconds long (never exceed 58s).
+3. Timestamps must be in "mm:ss" or "hh:mm:ss" and must fall strictly within 00:00 and ${formatSeconds(totalDurationSec)}.
+4. Spread the 15 moments strategically across the ENTIRE duration:
+   - Early Phase (0% to 25% of timeline): 3-4 clips (Opening Hook, Stream Warmup, Initial Rant/Challenge)
+   - Mid Phase (25% to 65% of timeline): 5-6 clips (Major confrontations, Hot Takes, Hilarious Fails, Game Highlights)
+   - Late Phase (65% to 85% of timeline): 3-4 clips (Intense peak, dramatic turn, emotional moment, fan reactions)
+   - Climax & Signoff (85% to 100% of timeline): 2-3 clips (Final boss/payoff, end challenge resolution, final wisdom)
+5. Generate high-converting hook titles (under 60 chars), 1-2 sentence descriptions, 3-5 hashtags, virality scores (0-100), categories, 3-second on-screen hook text overlays, and suggested pinned comments.
 
 REQUIRED JSON FORMAT:
 {
@@ -415,9 +470,12 @@ REQUIRED JSON FORMAT:
       "startTime": "hh:mm:ss",
       "endTime": "hh:mm:ss",
       "title": "Hook title under 60 chars",
-      "description": "Shorts description",
-      "hashtags": ["#tag1", "#tag2"],
-      "viralityScore": 90,
+      "description": "Shorts description with hook",
+      "hashtags": ["#tag1", "#tag2", "#tag3"],
+      "viralityScore": 92,
+      "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
+      "hookText": "Exact 3-second on-screen text overlay for editor",
+      "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
       "reasoning": "Reason why this milestone is a viral candidate"
     }
   ]
@@ -471,6 +529,16 @@ REQUIRED JSON FORMAT:
         ? clip.hashtags.map(t => (t.startsWith('#') ? t : `#${t}`.replace(/\s+/g, '')))
         : ['#Shorts', '#Viral'];
 
+      const categoriesList = ['Controversy & Debate', 'Comedy & Rage', 'Mindset & Advice', 'Plot Twist & Drama', 'Peak Climax'];
+      let matchedCategory = clip.category || 'Peak Climax';
+      if (!categoriesList.some(c => matchedCategory.toLowerCase().includes(c.toLowerCase().split(' ')[0]))) {
+        matchedCategory = categoriesList[index % categoriesList.length];
+      }
+
+      const cleanTitle = (clip.title || 'Must-Watch Moment').trim().substring(0, 65);
+      const hookText = (clip.hookText || cleanTitle).trim();
+      const pinnedComment = (clip.pinnedComment || 'What do you think about this? Let me know below! 👇').trim();
+
       return {
         id: `clip-${index + 1}`,
         startTime: formatSeconds(startSec),
@@ -478,10 +546,13 @@ REQUIRED JSON FORMAT:
         startSeconds: startSec,
         endSeconds: endSec,
         durationSeconds: clipDur,
-        title: (clip.title || 'Must-Watch Moment').trim().substring(0, 65),
+        title: cleanTitle,
         description: (clip.description || '').trim(),
         hashtags: tags,
         viralityScore: Math.round(score),
+        category: matchedCategory,
+        hookText,
+        pinnedComment,
         reasoning: (clip.reasoning || '').trim(),
         previewUrl: `https://youtu.be/${videoId}?t=${startSec}`
       };
