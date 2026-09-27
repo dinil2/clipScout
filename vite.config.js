@@ -49,7 +49,16 @@ export default defineConfig(({ command, mode }) => {
           }
 
           // Handle 1080p Clip Download via Python yt-dlp
-          if (req.url.startsWith('/api/download') && (req.method === 'GET' || req.method === 'POST')) {
+          if (req.url.startsWith('/api/download') && (req.method === 'GET' || req.method === 'POST' || req.method === 'OPTIONS')) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range, Authorization');
+            if (req.method === 'OPTIONS') {
+              res.statusCode = 200;
+              res.end();
+              return;
+            }
+
             try {
               const urlObj = new URL(req.url, 'http://localhost');
               let videoId = urlObj.searchParams.get('videoId');

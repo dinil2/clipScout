@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { 
   Copy, Check, Play, Download, Loader2, Flame, Zap, 
   Compass, Hash, Sparkles, MessageSquare, Video, 
-  CheckCircle2, Clock, AlertCircle, Smile, Trophy, FileText, Smartphone, Monitor, Crown,
-  X, ExternalLink, Terminal
+  CheckCircle2, Clock, AlertCircle, Smile, Trophy, FileText, Smartphone, Monitor, Crown
 } from 'lucide-react';
 import { formatDurationBadge } from '../utils/youtube';
 
@@ -29,9 +28,6 @@ export default function ClipCard({
   const [isDownloadDone, setIsDownloadDone] = useState(false);
   const [showInlinePlayer, setShowInlinePlayer] = useState(false);
   const [playerMode, setPlayerMode] = useState('16x9'); // '16x9' | '9x16'
-  const [showDownloadModal, setShowDownloadModal] = useState(false);
-  const [downloadModalData, setDownloadModalData] = useState(null);
-  const [copiedCli, setCopiedCli] = useState(false);
 
   const triggerCopy = (text, fieldName, label) => {
     navigator.clipboard.writeText(text);
@@ -70,74 +66,52 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
   const handleDownloadClip = async () => {
     if (isDownloading) return;
     setIsDownloading(true);
-    if (onNotify) onNotify(`Preparing 1080p clip download (${clip.durationSeconds}s slice)...`);
-
-    const safeTitle = (clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 45);
-    const fallbackCli = `yt-dlp --download-sections "*${clip.startTime}-${clip.endTime}" -f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best" "https://www.youtube.com/watch?v=${videoId}" -o "${safeTitle}.mp4"`;
+    if (onNotify) onNotify(`Clipping 1080p MP4 slice (${clip.durationSeconds}s)... please wait`);
 
     try {
-      const downloadUrl = `/api/download?videoId=${encodeURIComponent(videoId)}&start=${clip.startSeconds}&end=${clip.endSeconds}&title=${encodeURIComponent(clip.title)}`;
-      const res = await fetch(downloadUrl);
-      const contentType = res.headers.get('content-type') || '';
-
-      // 1. If backend streams direct MP4 binary (Local development server)
-      if (res.ok && contentType.includes('video/')) {
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = blobUrl;
-        a.download = `${safeTitle}_${clip.startSeconds}-${clip.endSeconds}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-
-        setIsDownloadDone(true);
-        if (onNotify) onNotify(`Downloaded "${clip.title}" in 1080p!`);
-        setTimeout(() => setIsDownloadDone(false), 3500);
-        return;
+      const query = `videoId=${encodeURIComponent(videoId)}&start=${clip.startSeconds}&end=${clip.endSeconds}&title=${encodeURIComponent(clip.title)}`;
+      
+      // 1. Try relative endpoint /api/download first
+      let res = null;
+      try {
+        res = await fetch(`/api/download?${query}`);
+      } catch (err) {
+        res = null;
       }
 
-      // 2. If backend returns JSON export options (Netlify production serverless)
-      if (res.ok && contentType.includes('application/json')) {
-        const data = await res.json();
-        setDownloadModalData(data);
-        setShowDownloadModal(true);
-        if (onNotify) onNotify(`1080p Export Suite ready!`);
-        return;
-      }
-
-      throw new Error('Serverless export mode');
-    } catch (err) {
-      // Fallback: Show the 1080p Export Suite modal with pre-configured lossless CLI and Web Trimmers
-      setDownloadModalData({
-        videoId,
-        start: clip.startSeconds,
-        end: clip.endSeconds,
-        duration: clip.durationSeconds,
-        title: clip.title,
-        cliCommand: fallbackCli,
-        youtubeUrl: `https://youtu.be/${videoId}?t=${clip.startSeconds}`,
-        downloadServices: [
-          {
-            name: 'YT Cutter (Web Timestamp Trimmer)',
-            url: 'https://ytcutter.com/',
-            tip: 'Trim directly in browser with start & end timestamps'
-          },
-          {
-            name: 'Cobalt Media (Lossless 1080p)',
-            url: 'https://cobalt.tools/',
-            tip: 'Fast ad-free 1080p media downloader'
-          },
-          {
-            name: 'SaveFrom / ssYouTube',
-            url: `https://www.ssyoutube.com/watch?v=${videoId}`,
-            tip: 'Direct browser MP4 video grabber'
+      // 2. If relative endpoint is not returning video stream, try local Python clipper bridge
+      if (!res || !res.ok || !res.headers.get('content-type')?.includes('video/')) {
+        try {
+          const localRes = await fetch(`http://localhost:5173/api/download?${query}`);
+          if (localRes.ok && localRes.headers.get('content-type')?.includes('video/')) {
+            res = localRes;
           }
-        ]
-      });
-      setShowDownloadModal(true);
-      if (onNotify) onNotify(`1080p Export Suite ready!`);
+        } catch (e) {
+          // local bridge not responding
+        }
+      }
+
+      if (!res || !res.ok || !res.headers.get('content-type')?.includes('video/')) {
+        throw new Error('Download engine offline. Ensure local dev server is running.');
+      }
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      const safeTitle = (clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+      a.download = `${safeTitle}_${clip.startSeconds}-${clip.endSeconds}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+
+      setIsDownloadDone(true);
+      if (onNotify) onNotify(`Downloaded "${clip.title}" in 1080p!`);
+      setTimeout(() => setIsDownloadDone(false), 3500);
+    } catch (err) {
+      console.error('Download error:', err);
+      if (onNotify) onNotify(`Download error: ${err.message}`);
     } finally {
       setIsDownloading(false);
     }
@@ -725,174 +699,6 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
           )}
         </button>
       </div>
-
-      {/* 🎬 1080p Clip Export & Download Suite Modal */}
-      {showDownloadModal && (
-        <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in"
-          onClick={() => setShowDownloadModal(false)}
-        >
-          <div 
-            className="bg-studio-900 border border-studio-700/90 rounded-2xl w-full max-w-xl p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="flex items-start justify-between gap-3 border-b border-studio-800 pb-3.5">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-                  <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                    1080p Shorts Clipper & Export Suite
-                  </h3>
-                </div>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Export high-fidelity 1080p video slice for CapCut, Premiere, or YouTube Studio
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowDownloadModal(false)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-studio-800 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Clip Summary Pill */}
-            <div className="bg-studio-950/80 rounded-xl p-3 border border-studio-800 flex items-center justify-between gap-3 flex-wrap">
-              <div className="min-w-0">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/90 block">
-                  Target Timestamp Slice
-                </span>
-                <span className="text-sm font-bold text-white truncate block">
-                  {clip.title}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
-                <span>{clip.startTime}</span>
-                <span>→</span>
-                <span>{clip.endTime}</span>
-                <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded text-amber-200">
-                  {clip.durationSeconds}s
-                </span>
-              </div>
-            </div>
-
-            {/* Method 1: Instant Lossless 1080p / 4K CLI Command (Recommended) */}
-            <div className="bg-studio-850/90 border border-studio-700/80 rounded-xl p-4 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Terminal className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-bold text-emerald-300 uppercase tracking-wide">
-                    Method 1: 1-Click Lossless 1080p CLI (Fastest — 3s)
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cmd = downloadModalData?.cliCommand || `yt-dlp --download-sections "*${clip.startTime}-${clip.endTime}" -f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best" "https://www.youtube.com/watch?v=${videoId}" -o "${(clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 45)}.mp4"`;
-                    navigator.clipboard.writeText(cmd);
-                    setCopiedCli(true);
-                    if (onNotify) onNotify('Copied 1-line 1080p yt-dlp command!');
-                    setTimeout(() => setCopiedCli(false), 2500);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-semibold border border-emerald-500/40 transition active:scale-95"
-                >
-                  {copiedCli ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Command</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="bg-black/90 p-2.5 rounded-lg border border-studio-750 font-mono text-[11px] text-zinc-300 break-all select-all">
-                {downloadModalData?.cliCommand || `yt-dlp --download-sections "*${clip.startTime}-${clip.endTime}" -f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best" "https://www.youtube.com/watch?v=${videoId}" -o "${(clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 45)}.mp4"`}
-              </div>
-
-              <p className="text-[11px] text-zinc-400 leading-relaxed">
-                ⚡ Paste directly into your terminal or PowerShell. Downloads <strong>only</strong> this exact slice with zero quality loss and no full-video download wait.
-              </p>
-            </div>
-
-            {/* Method 2: Online Web Cutters (No Software Needed) */}
-            <div className="space-y-2">
-              <span className="text-xs font-bold text-zinc-300 uppercase tracking-wide block">
-                Method 2: Online Browser Trimmers (Zero Install)
-              </span>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* YT Cutter */}
-                <a
-                  href="https://ytcutter.com/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${videoId}`);
-                    if (onNotify) onNotify('Copied video link to paste into trimmer!');
-                  }}
-                  className="p-3 bg-studio-850 hover:bg-studio-800 border border-studio-750 rounded-xl transition flex flex-col justify-between group"
-                >
-                  <div className="flex items-center justify-between text-xs font-bold text-white group-hover:text-amber-300">
-                    <span>✂️ YT Cutter (Trimmer)</span>
-                    <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover:text-amber-400" />
-                  </div>
-                  <p className="text-[11px] text-zinc-400 mt-1">
-                    Trims directly by timestamp in browser. Link copied automatically on click!
-                  </p>
-                </a>
-
-                {/* Cobalt Tools */}
-                <a
-                  href="https://cobalt.tools/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${videoId}`);
-                    if (onNotify) onNotify('Copied video link for Cobalt!');
-                  }}
-                  className="p-3 bg-studio-850 hover:bg-studio-800 border border-studio-750 rounded-xl transition flex flex-col justify-between group"
-                >
-                  <div className="flex items-center justify-between text-xs font-bold text-white group-hover:text-amber-300">
-                    <span>⚡ Cobalt Media (1080p)</span>
-                    <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover:text-amber-400" />
-                  </div>
-                  <p className="text-[11px] text-zinc-400 mt-1">
-                    Fast ad-free 1080p MP4 download with zero ads or tracking.
-                  </p>
-                </a>
-              </div>
-            </div>
-
-            {/* Method 3: Subtitles & Video Jump */}
-            <div className="pt-2 border-t border-studio-800 flex items-center justify-between flex-wrap gap-2 text-xs">
-              <button
-                type="button"
-                onClick={handleDownloadSrt}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700 text-zinc-200 transition"
-              >
-                <FileText className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Export Timed .SRT Captions</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowDownloadModal(false)}
-                className="px-4 py-1.5 rounded-xl bg-studio-800 hover:bg-studio-750 text-white font-semibold transition"
-              >
-                Done
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </article>
   );
