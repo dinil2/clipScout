@@ -35,10 +35,10 @@ function parseTimestamp(timestamp) {
 }
 
 /**
- * Condenses transcript to <= targetMaxWords (~2200 words / ~2900 tokens)
+ * Condenses transcript to <= targetMaxWords (~950 words / ~1300 tokens)
  * Samples evenly across 100% of the timeline so the end is never cut off.
  */
-function condenseTranscript(items, targetMaxWords = 2200) {
+function condenseTranscript(items, targetMaxWords = 950) {
   if (!items || items.length === 0) return '';
 
   // 1. Clean items
@@ -186,73 +186,82 @@ async function generateShortsClips(prompt) {
   }
 
   if (useGroq) {
-    // openai/gpt-oss-120b supports full 8000 TPM with no restrictive OTPM cap, returning up to 15 clips reliably
-    const candidateModels = [
-      'openai/gpt-oss-120b',
-      'openai/gpt-oss-20b'
-    ];
-
+    // openai/gpt-oss-120b is the flagship model on Groq with full JSON support and 8000 TPM
+    const model = 'openai/gpt-oss-120b';
     let lastError = null;
 
-    for (const model of candidateModels) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${activeKey}`
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                {
-                  role: 'system',
-                  content: `You are an elite YouTube Shorts producer, virality algorithm specialist, and video editor.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${activeKey}`
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: 'system',
+                content: `You are an elite YouTube Shorts producer, virality algorithm specialist, and video editor.
 Identify viral, hook-driven, self-contained moments (15 to 58 seconds) from video content.
 Always output valid JSON conforming strictly to the requested schema with 12 to 15 viral clips.`
-                },
-                {
-                  role: 'user',
-                  content: prompt
-                }
-              ],
-              response_format: { type: 'json_object' },
-              max_tokens: 3600,
-              temperature: 0.3
-            })
-          });
+              },
+              {
+                role: 'user',
+                content: prompt
+              }
+            ],
+            response_format: { type: 'json_object' },
+            max_tokens: 2800,
+            temperature: 0.3
+          })
+        });
 
-          if (res.status === 429) {
-            console.warn(`Groq model ${model} rate-limited (429). Attempt ${attempt}.`);
-            if (attempt === 1) {
-              await new Promise(r => setTimeout(r, 4000));
+        if (res.status === 429) {
+          console.warn(`Groq rate-limit (429) on attempt ${attempt}. Waiting before retry...`);
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, attempt * 3000));
+            continue;
+          }
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          let parsedMsg = errText;
+          try {
+            const errJson = JSON.parse(errText);
+            parsedMsg = errJson.error?.message || errText;
+          } catch {}
+          lastError = new Error(`Groq API error (${res.status}): ${parsedMsg}`);
+          if (res.status === 503 || res.status === 500) {
+            if (attempt < 3) {
+              await new Promise(r => setTimeout(r, 2000));
               continue;
             }
-            break; // Try next model
           }
-
-          if (!res.ok) {
-            const errText = await res.text();
-            lastError = new Error(`Groq model ${model} error (${res.status}): ${errText}`);
-            break;
-          }
-
-          const data = await res.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (!content) {
-            lastError = new Error(`Empty content from Groq model ${model}`);
-            break;
-          }
-          return JSON.parse(content);
-        } catch (err) {
-          lastError = err;
           break;
+        }
+
+        const data = await res.json();
+        const content = data.choices?.[0]?.message?.content;
+        if (!content) {
+          lastError = new Error('Empty response received from Groq AI model.');
+          break;
+        }
+
+        // Clean any accidental markdown fence if present
+        const cleaned = content.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        return JSON.parse(cleaned);
+      } catch (err) {
+        lastError = err;
+        if (attempt < 3) {
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
     }
 
-    throw lastError || new Error('All Groq model attempts failed.');
+    throw lastError || new Error('Groq AI model failed to generate clips.');
   } else {
     // GEMINI REST API Call
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${activeKey}`;
@@ -394,8 +403,8 @@ export const handler = async (event) => {
       const lastItem = normalizedTranscript[normalizedTranscript.length - 1];
       totalDurationSec = Math.ceil(lastItem.offset + lastItem.duration);
 
-      // Smart transcript condensing to stay strictly under token limits (up to 2200 words)
-      const condensed = condenseTranscript(normalizedTranscript, 2200);
+      // Smart transcript condensing to stay strictly under token limits (up to 950 words)
+      const condensed = condenseTranscript(normalizedTranscript, 950);
 
       prompt = `You are an elite YouTube Shorts virality algorithm specialist and video editor.
 Analyze this timed transcript from "${metadata.title}" by "${metadata.author}" (Duration: ${formatSeconds(totalDurationSec)}).
