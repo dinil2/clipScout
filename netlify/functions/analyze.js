@@ -420,7 +420,7 @@ REQUIRED JSON FORMAT:
       "description": "1-2 sentence YouTube Shorts description",
       "hashtags": ["#tag1", "#tag2", "#tag3"],
       "viralityScore": 92,
-      "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
+      "category": "Luxury & Lifestyle | Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
       "hookText": "Exact 3-second on-screen text overlay for editor",
       "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
       "editingTip": "Actionable editing cue e.g. Punch-in zoom at 0:02, whoosh SFX on hook, highlight subtitles at punchline",
@@ -428,6 +428,9 @@ REQUIRED JSON FORMAT:
     }
   ]
 }
+
+SPECIAL VIRALITY DIRECTIVE:
+Pay special attention to luxury lifestyle & flex moments (supercars, private jets, luxury watches, penthouses, high-end dinners, wealth flexing, aesthetic life shots) and categorize them as "Luxury & Lifestyle" since these generate astronomical view counts on Shorts.
 
 TRANSCRIPT:
 ${condensed}`;
@@ -460,10 +463,11 @@ CRITICAL RULES:
 3. Timestamps must be in "mm:ss" or "hh:mm:ss" and must fall strictly within 00:00 and ${formatSeconds(totalDurationSec)}.
 4. Spread the 15 moments strategically across the ENTIRE duration:
    - Early Phase (0% to 25% of timeline): 3-4 clips (Opening Hook, Stream Warmup, Initial Rant/Challenge)
-   - Mid Phase (25% to 65% of timeline): 5-6 clips (Major confrontations, Hot Takes, Hilarious Fails, Game Highlights)
+   - Mid Phase (25% to 65% of timeline): 5-6 clips (Major confrontations, Hot Takes, Hilarious Fails, Game Highlights, Luxury/Lifestyle flex)
    - Late Phase (65% to 85% of timeline): 3-4 clips (Intense peak, dramatic turn, emotional moment, fan reactions)
    - Climax & Signoff (85% to 100% of timeline): 2-3 clips (Final boss/payoff, end challenge resolution, final wisdom)
 5. Generate high-converting hook titles (under 60 chars), 1-2 sentence descriptions, 3-5 hashtags, virality scores (0-100), categories, 3-second on-screen hook text overlays, suggested pinned comments, and actionable editing cues.
+6. Tag any supercars, penthouses, private jets, expensive dinners, or aesthetic wealth flex as "Luxury & Lifestyle".
 
 REQUIRED JSON FORMAT:
 {
@@ -475,7 +479,7 @@ REQUIRED JSON FORMAT:
       "description": "Shorts description with hook",
       "hashtags": ["#tag1", "#tag2", "#tag3"],
       "viralityScore": 92,
-      "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
+      "category": "Luxury & Lifestyle | Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
       "hookText": "Exact 3-second on-screen text overlay for editor",
       "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
       "editingTip": "Actionable editing cue e.g. Punch-in zoom at 0:02, whoosh SFX on hook, highlight subtitles at punchline",
@@ -532,10 +536,20 @@ REQUIRED JSON FORMAT:
         ? clip.hashtags.map(t => (t.startsWith('#') ? t : `#${t}`.replace(/\s+/g, '')))
         : ['#Shorts', '#Viral'];
 
-      const categoriesList = ['Controversy & Debate', 'Comedy & Rage', 'Mindset & Advice', 'Plot Twist & Drama', 'Peak Climax'];
-      let matchedCategory = clip.category || 'Peak Climax';
-      if (!categoriesList.some(c => matchedCategory.toLowerCase().includes(c.toLowerCase().split(' ')[0]))) {
-        matchedCategory = categoriesList[index % categoriesList.length];
+      const rawCat = (clip.category || '').toLowerCase();
+      let matchedCategory = 'Luxury & Lifestyle';
+      if (rawCat.includes('lux') || rawCat.includes('life') || rawCat.includes('flex') || rawCat.includes('car') || rawCat.includes('jet') || rawCat.includes('money') || rawCat.includes('wealth') || rawCat.includes('rich') || rawCat.includes('mansion') || rawCat.includes('dinner')) {
+        matchedCategory = 'Luxury & Lifestyle';
+      } else if (rawCat.includes('controvers') || rawCat.includes('debate') || rawCat.includes('hot take') || rawCat.includes('argument')) {
+        matchedCategory = 'Controversy & Debate';
+      } else if (rawCat.includes('comed') || rawCat.includes('rage') || rawCat.includes('funny') || rawCat.includes('laugh') || rawCat.includes('fail')) {
+        matchedCategory = 'Comedy & Rage';
+      } else if (rawCat.includes('mind') || rawCat.includes('advice') || rawCat.includes('insight') || rawCat.includes('lesson') || rawCat.includes('wisdom')) {
+        matchedCategory = 'Mindset & Advice';
+      } else if (rawCat.includes('twist') || rawCat.includes('drama') || rawCat.includes('shock') || rawCat.includes('reveal')) {
+        matchedCategory = 'Plot Twist & Drama';
+      } else {
+        matchedCategory = clip.category || 'Peak Climax';
       }
 
       const cleanTitle = (clip.title || 'Must-Watch Moment').trim().substring(0, 65);

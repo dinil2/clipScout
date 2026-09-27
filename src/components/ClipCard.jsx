@@ -154,6 +154,13 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
   // Category Badge visual styling
   const getCategoryBadge = (category = '') => {
     const cat = category.toLowerCase();
+    if (cat.includes('lux') || cat.includes('life') || cat.includes('flex') || cat.includes('car') || cat.includes('jet') || cat.includes('wealth') || cat.includes('rich') || cat.includes('mansion')) {
+      return {
+        icon: Crown,
+        style: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10 font-bold',
+        label: '💎 Luxury & Lifestyle'
+      };
+    }
     if (cat.includes('controversy') || cat.includes('debate')) {
       return {
         icon: Flame,
@@ -171,7 +178,7 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
     if (cat.includes('mindset') || cat.includes('advice') || cat.includes('insight')) {
       return {
         icon: Sparkles,
-        style: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+        style: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
         label: 'Mindset & Advice'
       };
     }

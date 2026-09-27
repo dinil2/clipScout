@@ -168,6 +168,9 @@ export default function App() {
     if (selectedCategory !== 'all') {
       list = list.filter(c => {
         const cat = (c.category || '').toLowerCase();
+        if (selectedCategory === 'luxury') {
+          return cat.includes('lux') || cat.includes('life') || cat.includes('flex') || cat.includes('car') || cat.includes('jet') || cat.includes('wealth') || cat.includes('rich') || cat.includes('mansion');
+        }
         return cat.includes(selectedCategory.toLowerCase());
       });
     }
@@ -286,6 +289,7 @@ export default function App() {
                 </span>
                 {[
                   { id: 'all', label: `All (${clips.length})` },
+                  { id: 'luxury', label: '💎 Luxury & Flex' },
                   { id: 'controversy', label: '🔥 Controversy' },
                   { id: 'comedy', label: '😂 Comedy' },
                   { id: 'mindset', label: '💡 Mindset & Advice' },
