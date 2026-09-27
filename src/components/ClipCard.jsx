@@ -2,9 +2,18 @@ import React, { useState } from 'react';
 import { 
   Copy, Check, Play, Download, Loader2, Flame, Zap, 
   Compass, Hash, Sparkles, MessageSquare, Video, 
-  CheckCircle2, Clock, AlertCircle, Smile, Trophy
+  CheckCircle2, Clock, AlertCircle, Smile, Trophy, FileText, Smartphone, Monitor
 } from 'lucide-react';
 import { formatDurationBadge } from '../utils/youtube';
+
+function formatSrtTime(totalSec) {
+  const s = Math.max(0, totalSec);
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  const ms = Math.floor((s % 1) * 1000);
+  return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
 
 export default function ClipCard({ 
   clip, 
@@ -18,6 +27,7 @@ export default function ClipCard({
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadDone, setIsDownloadDone] = useState(false);
   const [showInlinePlayer, setShowInlinePlayer] = useState(false);
+  const [playerMode, setPlayerMode] = useState('16x9'); // '16x9' | '9x16'
 
   const triggerCopy = (text, fieldName, label) => {
     navigator.clipboard.writeText(text);
@@ -43,6 +53,9 @@ ${clip.hashtags.join(' ')}
 
 💬 PINNED COMMENT:
 "${clip.pinnedComment || 'What do you think about this? Comment below! 👇'}"
+
+✂️ EDITING CUE:
+"${clip.editingTip || 'Punch-in zoom at 0:02, whoosh sound effect on hook'}"
 
 ⏱️ TIMESTAMPS:
 ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
@@ -84,6 +97,32 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
     } finally {
       setIsDownloading(false);
     }
+  };
+
+  const handleDownloadSrt = () => {
+    const subs = Array.isArray(clip.subtitles) && clip.subtitles.length > 0
+      ? clip.subtitles
+      : [
+          { start: 0, end: Math.min(3, clip.durationSeconds), text: clip.hookText || clip.title },
+          { start: Math.min(3, clip.durationSeconds), end: clip.durationSeconds, text: clip.title }
+        ];
+
+    const srtLines = subs.map((s, idx) => {
+      return `${idx + 1}\n${formatSrtTime(s.start)} --> ${formatSrtTime(s.end)}\n${s.text}\n`;
+    });
+
+    const srtContent = srtLines.join('\n');
+    const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    const safeTitle = (clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+    a.download = `${safeTitle}_captions.srt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
+    if (onNotify) onNotify('Downloaded .SRT subtitles for CapCut / Premiere!');
   };
 
   // Score Badge visual styling
@@ -247,7 +286,7 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
 
       </div>
 
-      {/* Action Buttons Bar: Inline Player Toggle, Preview on YouTube, 1080p Download */}
+      {/* Action Buttons Bar: Inline Player Toggle, Preview on YouTube, 1080p Download, SRT Export */}
       <div className="mt-3.5 flex items-center flex-wrap gap-2.5">
         {/* Inline YouTube Player Toggle */}
         <button
@@ -307,18 +346,98 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
             </>
           )}
         </button>
+
+        {/* Download Subtitles SRT */}
+        <button
+          type="button"
+          onClick={handleDownloadSrt}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-studio-850 hover:bg-studio-800 text-zinc-300 hover:text-white border border-studio-700 text-xs font-medium transition"
+          title="Download timed .SRT captions to import directly into CapCut or Premiere"
+        >
+          <FileText className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Export .SRT</span>
+        </button>
       </div>
 
-      {/* Embedded Inline YouTube Player */}
+      {/* Embedded Inline YouTube Player with 9:16 Shorts Simulator */}
       {showInlinePlayer && (
-        <div className="mt-4 rounded-xl overflow-hidden bg-black border border-studio-700 shadow-2xl aspect-video animate-fade-in">
-          <iframe
-            src={`https://www.youtube-nocookie.com/embed/${videoId}?start=${clip.startSeconds}&end=${clip.endSeconds}&autoplay=1&rel=0`}
-            title={`Preview: ${clip.title}`}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            className="w-full h-full border-0"
-          />
+        <div className="mt-4 p-3 bg-studio-900 border border-studio-800 rounded-2xl animate-fade-in">
+          {/* Mode Switcher */}
+          <div className="flex items-center justify-between mb-3 text-xs">
+            <span className="text-zinc-400 font-medium">Player Preview Mode:</span>
+            <div className="flex items-center gap-1 bg-studio-950 p-1 rounded-xl border border-studio-800">
+              <button
+                type="button"
+                onClick={() => setPlayerMode('16x9')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition ${
+                  playerMode === '16x9'
+                    ? 'bg-amber-500 text-studio-950 font-bold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span>16:9 Standard</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlayerMode('9x16')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition ${
+                  playerMode === '9x16'
+                    ? 'bg-amber-500 text-studio-950 font-bold'
+                    : 'text-zinc-400 hover:text-white'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>📱 9:16 Shorts Simulator</span>
+              </button>
+            </div>
+          </div>
+
+          {playerMode === '16x9' ? (
+            <div className="rounded-xl overflow-hidden bg-black border border-studio-700 shadow-2xl aspect-video">
+              <iframe
+                src={`https://www.youtube-nocookie.com/embed/${videoId}?start=${clip.startSeconds}&end=${clip.endSeconds}&autoplay=1&rel=0`}
+                title={`Preview: ${clip.title}`}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full border-0"
+              />
+            </div>
+          ) : (
+            /* 9:16 Vertical Smartphone Shorts Simulator */
+            <div className="flex flex-col items-center justify-center py-2">
+              <div className="relative w-[280px] sm:w-[310px] aspect-[9/16] rounded-3xl overflow-hidden border-4 border-zinc-700 shadow-2xl bg-black flex items-center justify-center">
+                {/* Scaled/Cropped iframe to center */}
+                <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+                  <iframe
+                    src={`https://www.youtube-nocookie.com/embed/${videoId}?start=${clip.startSeconds}&end=${clip.endSeconds}&autoplay=1&rel=0`}
+                    className="w-[178%] h-full max-w-none pointer-events-auto"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+
+                {/* Simulated On-Screen Hook Overlay in Shorts format */}
+                {clip.hookText && (
+                  <div className="absolute top-10 inset-x-4 pointer-events-none z-10 text-center">
+                    <span className="inline-block bg-black/80 backdrop-blur-md text-amber-300 font-extrabold text-[11px] sm:text-xs px-3 py-1.5 rounded-lg border border-amber-500/40 uppercase shadow-lg tracking-wide">
+                      {clip.hookText}
+                    </span>
+                  </div>
+                )}
+
+                {/* Simulated Shorts Actions (Like / Comment / Share) */}
+                <div className="absolute bottom-5 right-2.5 flex flex-col items-center gap-2.5 pointer-events-none text-white text-[10px] font-semibold drop-shadow-md">
+                  <div className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">❤️</div>
+                  <div className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">💬</div>
+                  <div className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">↗️</div>
+                </div>
+              </div>
+              <p className="text-[11px] text-zinc-500 mt-2 text-center">
+                📱 9:16 Shorts Simulator: Verify framing before vertical crop in CapCut
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -423,6 +542,41 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
           </div>
         )}
 
+        {/* 🎬 Pro Editing Cues (Zooms, SFX, B-Roll) */}
+        {clip.editingTip && (
+          <div className="bg-purple-500/10 border border-purple-500/25 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-300 block">
+                  🎬 Retention & Editing Cues (CapCut / Premiere)
+                </span>
+                <span className="text-xs sm:text-sm text-purple-200 font-medium">
+                  {clip.editingTip}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => triggerCopy(clip.editingTip, 'editingTip', 'editing cue')}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-xs font-semibold transition shrink-0 self-start sm:self-auto"
+              title="Copy editing cue"
+            >
+              {copiedField === 'editingTip' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300">Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Cue</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* Description & Copy */}
         <div className="bg-studio-900/80 rounded-xl p-3 border border-studio-800/80">
           <div className="flex items-center justify-between text-xs text-zinc-400 font-medium mb-1">
@@ -435,12 +589,12 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
             >
               {copiedField === 'description' ? (
                 <>
-                  <Check className="w-3 h-3 text-emerald-400" />
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
                   <span className="text-emerald-400">Copied</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3 h-3" />
+                  <Copy className="w-3.5 h-3.5" />
                   <span>Copy</span>
                 </>
               )}
@@ -476,12 +630,12 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
           >
             {copiedField === 'hashtags' ? (
               <>
-                <Check className="w-3 h-3 text-emerald-400" />
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-emerald-400 font-sans">Copied tags</span>
               </>
             ) : (
               <>
-                <Copy className="w-3 h-3" />
+                <Copy className="w-3.5 h-3.5" />
                 <span className="font-sans">Copy all tags</span>
               </>
             )}
@@ -494,7 +648,7 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
       <div className="mt-5 pt-3.5 border-t border-studio-800 flex items-center justify-between flex-wrap gap-3">
         <div className="text-xs text-zinc-500 flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>Ready to paste directly into YouTube Studio</span>
+          <span>Ready to paste directly into YouTube Studio & CapCut</span>
         </div>
 
         <button
@@ -503,9 +657,9 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
           className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shadow-sm ${
             copiedField === 'all'
               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-              : 'bg-studio-800 hover:bg-studio-700 text-zinc-100 hover:text-white border border-studio-700'
+              : 'bg-studio-800 hover:bg-studio-750 text-zinc-100 hover:text-white border border-studio-700'
           }`}
-          title="Copies Title, Hook, Description, Hashtags, and Pinned Comment in one formatted block"
+          title="Copies Title, Hook, Description, Hashtags, Pinned Comment, and Editing Cues in one formatted block"
         >
           {copiedField === 'all' ? (
             <>
@@ -515,7 +669,7 @@ ${clip.startTime} - ${clip.endTime} (${clip.durationSeconds}s)`;
           ) : (
             <>
               <Copy className="w-4 h-4 text-amber-400" />
-              <span>Copy All (Title + Hook + Desc + Tags)</span>
+              <span>Copy Full Package</span>
             </>
           )}
         </button>

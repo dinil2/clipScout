@@ -358,6 +358,7 @@ export const handler = async (event) => {
     // 2. Fetch transcript via youtube-transcript
     let rawTranscript = null;
     let hasTranscript = false;
+    let normalizedTranscript = [];
 
     try {
       rawTranscript = await YoutubeTranscript.fetchTranscript(videoId);
@@ -376,7 +377,7 @@ export const handler = async (event) => {
       // Robust detection of millisecond offsets vs seconds
       const isMilliseconds = rawTranscript.some(t => t.duration > 50 || t.offset > 86400);
 
-      const normalizedTranscript = rawTranscript.map(item => {
+      normalizedTranscript = rawTranscript.map(item => {
         let offsetSec = item.offset;
         let durSec = item.duration;
         if (isMilliseconds) {
@@ -407,7 +408,7 @@ CRITICAL RULES:
 2. Every clip MUST be strictly between 15 and 58 seconds long (never exceed 58s).
 3. Timestamps must be in "mm:ss" or "hh:mm:ss" and fall within 00:00 and ${formatSeconds(totalDurationSec)}.
 4. Ensure clips span the entire video timeline: early, mid, late, and climax sections.
-5. Provide high-converting titles (under 60 chars), descriptions, 3-5 hashtags, virality scores (0-100), categories, on-screen 3-second hook text overlays, and engaging pinned comment questions.
+5. Provide high-converting titles (under 60 chars), descriptions, 3-5 hashtags, virality scores (0-100), categories, on-screen 3-second hook text overlays, engaging pinned comment questions, and actionable editing cues (zooms, SFX, B-roll).
 
 REQUIRED JSON FORMAT:
 {
@@ -422,6 +423,7 @@ REQUIRED JSON FORMAT:
       "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
       "hookText": "Exact 3-second on-screen text overlay for editor",
       "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
+      "editingTip": "Actionable editing cue e.g. Punch-in zoom at 0:02, whoosh SFX on hook, highlight subtitles at punchline",
       "reasoning": "one sentence on why this moment works"
     }
   ]
@@ -461,7 +463,7 @@ CRITICAL RULES:
    - Mid Phase (25% to 65% of timeline): 5-6 clips (Major confrontations, Hot Takes, Hilarious Fails, Game Highlights)
    - Late Phase (65% to 85% of timeline): 3-4 clips (Intense peak, dramatic turn, emotional moment, fan reactions)
    - Climax & Signoff (85% to 100% of timeline): 2-3 clips (Final boss/payoff, end challenge resolution, final wisdom)
-5. Generate high-converting hook titles (under 60 chars), 1-2 sentence descriptions, 3-5 hashtags, virality scores (0-100), categories, 3-second on-screen hook text overlays, and suggested pinned comments.
+5. Generate high-converting hook titles (under 60 chars), 1-2 sentence descriptions, 3-5 hashtags, virality scores (0-100), categories, 3-second on-screen hook text overlays, suggested pinned comments, and actionable editing cues.
 
 REQUIRED JSON FORMAT:
 {
@@ -476,6 +478,7 @@ REQUIRED JSON FORMAT:
       "category": "Controversy & Debate | Comedy & Rage | Mindset & Advice | Plot Twist & Drama | Peak Climax",
       "hookText": "Exact 3-second on-screen text overlay for editor",
       "pinnedComment": "Engaging question to pin in comments for maximum comment bait",
+      "editingTip": "Actionable editing cue e.g. Punch-in zoom at 0:02, whoosh SFX on hook, highlight subtitles at punchline",
       "reasoning": "Reason why this milestone is a viral candidate"
     }
   ]
@@ -538,6 +541,26 @@ REQUIRED JSON FORMAT:
       const cleanTitle = (clip.title || 'Must-Watch Moment').trim().substring(0, 65);
       const hookText = (clip.hookText || cleanTitle).trim();
       const pinnedComment = (clip.pinnedComment || 'What do you think about this? Let me know below! 👇').trim();
+      const editingTip = (clip.editingTip || 'Punch-in 1.2x zoom at 0:02, whoosh SFX on hook overlay, and animated captions for key words in CapCut.').trim();
+
+      // Extract timed subtitle lines for this slice if transcript exists
+      let subtitles = [];
+      if (normalizedTranscript && normalizedTranscript.length > 0) {
+        subtitles = normalizedTranscript
+          .filter(t => (t.offset + t.duration) >= startSec && t.offset <= endSec)
+          .map(t => ({
+            start: Math.max(0, Math.round((t.offset - startSec) * 10) / 10),
+            end: Math.min(clipDur, Math.round((t.offset + t.duration - startSec) * 10) / 10),
+            text: t.text
+          }))
+          .filter(t => t.text && t.text.length > 0);
+      }
+      if (subtitles.length === 0) {
+        subtitles = [
+          { start: 0, end: Math.min(3.5, clipDur), text: hookText },
+          { start: Math.min(3.5, clipDur), end: clipDur, text: cleanTitle }
+        ];
+      }
 
       return {
         id: `clip-${index + 1}`,
@@ -553,6 +576,8 @@ REQUIRED JSON FORMAT:
         category: matchedCategory,
         hookText,
         pinnedComment,
+        editingTip,
+        subtitles,
         reasoning: (clip.reasoning || '').trim(),
         previewUrl: `https://youtu.be/${videoId}?t=${startSec}`
       };
