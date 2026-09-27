@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Copy, Check, Play, Download, Loader2, Flame, Zap, 
   Compass, Hash, Sparkles, MessageSquare, Video, 
-  CheckCircle2, Clock, AlertCircle, Smile, Trophy, FileText, Smartphone, Monitor
+  CheckCircle2, Clock, AlertCircle, Smile, Trophy, FileText, Smartphone, Monitor, Crown
 } from 'lucide-react';
 import { formatDurationBadge } from '../utils/youtube';
 
