@@ -5,33 +5,7 @@ import {
   HardDrive, Video, Laptop, HelpCircle
 } from 'lucide-react';
 
-// Popular podcast samples for instant 1-click testing (verified with full captions)
-const SAMPLE_PODCASTS = [
-  {
-    id: 'UF8uR6Z6KLc',
-    title: 'Steve Jobs',
-    topic: 'Stanford Commencement Address',
-    url: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc'
-  },
-  {
-    id: 'lIo9FcrljDk',
-    title: 'Huberman Lab',
-    topic: 'Master Your Sleep & Alertness',
-    url: 'https://www.youtube.com/watch?v=lIo9FcrljDk'
-  },
-  {
-    id: 'L_Guz73e6fw',
-    title: 'Lex Fridman',
-    topic: 'Sam Altman: Future of AI & GPT',
-    url: 'https://www.youtube.com/watch?v=L_Guz73e6fw'
-  },
-  {
-    id: 'sSOxPJD-VNo',
-    title: 'Joe Rogan',
-    topic: 'Elon Musk (#2281)',
-    url: 'https://www.youtube.com/watch?v=sSOxPJD-VNo'
-  }
-];
+import { SAMPLE_PODCASTS } from '../data/samples.js';
 
 export default function HeroInput({ 
   onAnalyze, 
@@ -76,6 +50,15 @@ export default function HeroInput({
     setUrl(sample.url);
     setCopiedSampleId(sample.id);
     setTimeout(() => setCopiedSampleId(null), 1500);
+
+    if (onAnalyze) {
+      onAnalyze({
+        videoId: sample.id,
+        title: `${sample.title} - ${sample.topic}`,
+        author: sample.title,
+        ...(sample.transcriptSegments ? { transcriptSegments: sample.transcriptSegments } : {})
+      });
+    }
   };
 
   const handleSubmitLink = (e) => {
@@ -97,6 +80,18 @@ export default function HeroInput({
 
     if (!videoId) {
       alert('Please enter a valid YouTube or Google Drive link.');
+      return;
+    }
+
+    // If matches a curated sample, pass preloaded verified transcript for instant analysis
+    const foundSample = SAMPLE_PODCASTS.find(s => s.id === videoId || s.url === url.trim());
+    if (foundSample && foundSample.transcriptSegments) {
+      onAnalyze({
+        videoId: foundSample.id,
+        title: `${foundSample.title} - ${foundSample.topic}`,
+        author: foundSample.title,
+        transcriptSegments: foundSample.transcriptSegments
+      });
       return;
     }
 
