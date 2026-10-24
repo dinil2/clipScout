@@ -1,35 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Youtube, Clipboard, X, SlidersHorizontal, 
   Clock, Flame, Upload, FileText, ArrowRight, Play, Check,
   HardDrive, Video, Laptop, HelpCircle
 } from 'lucide-react';
 
-// Popular podcast samples for instant 1-click testing
+// Popular podcast samples for instant 1-click testing (verified with full captions)
 const SAMPLE_PODCASTS = [
   {
     id: 'UF8uR6Z6KLc',
     title: 'Steve Jobs',
-    topic: 'Stanford Commencement Speech',
+    topic: 'Stanford Commencement Address',
     url: 'https://www.youtube.com/watch?v=UF8uR6Z6KLc'
   },
   {
-    id: 'P9tF79m0R_k',
+    id: 'lIo9FcrljDk',
     title: 'Huberman Lab',
-    topic: 'Focus & Dopamine Hacks',
-    url: 'https://www.youtube.com/watch?v=P9tF79m0R_k'
+    topic: 'Master Your Sleep & Alertness',
+    url: 'https://www.youtube.com/watch?v=lIo9FcrljDk'
   },
   {
-    id: 'h2B_g2sA6b0',
+    id: 'L_Guz73e6fw',
     title: 'Lex Fridman',
-    topic: 'AI & The Future',
-    url: 'https://www.youtube.com/watch?v=h2B_g2sA6b0'
+    topic: 'Sam Altman: Future of AI & GPT',
+    url: 'https://www.youtube.com/watch?v=L_Guz73e6fw'
   },
   {
-    id: 'W_aM3z2k_Wk',
+    id: 'sSOxPJD-VNo',
     title: 'Joe Rogan',
-    topic: 'Discipline & Mindset',
-    url: 'https://www.youtube.com/watch?v=W_aM3z2k_Wk'
+    topic: 'Elon Musk (#2281)',
+    url: 'https://www.youtube.com/watch?v=sSOxPJD-VNo'
   }
 ];
 
@@ -38,11 +38,16 @@ export default function HeroInput({
   onUploadFile,
   isLoading, 
   options, 
-  setOptions 
+  setOptions,
+  initialTab = 'link'
 }) {
-  const [activeTab, setActiveTab] = useState('link'); // 'link' (YouTube/Drive) | 'laptop' (Local Video) | 'transcript'
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [url, setUrl] = useState('');
   const [showOptions, setShowOptions] = useState(false);
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
   const [pastedText, setPastedText] = useState('');
   const [uploadedTranscriptFile, setUploadedTranscriptFile] = useState(null);
   const [laptopVideoFile, setLaptopVideoFile] = useState(null);

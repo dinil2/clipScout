@@ -9,7 +9,8 @@ import SettingsModal from './components/SettingsModal.jsx';
 import Toast from './components/Toast.jsx';
 import { 
   Sparkles, Flame, Clock, Scissors, SlidersHorizontal, 
-  RotateCcw, AlertCircle, Share2, Download, Copy, Check 
+  RotateCcw, AlertCircle, Share2, Download, Copy, Check,
+  Laptop, FileText
 } from 'lucide-react';
 
 import { loadUserPasscode } from './utils/storage.js';
@@ -24,6 +25,7 @@ export default function App() {
   const [videoData, setVideoData] = useState(null);
   const [clips, setClips] = useState([]);
   const [sortOption, setSortOption] = useState('virality'); // 'virality' | 'chronological' | 'duration'
+  const [initialInputTab, setInitialInputTab] = useState('link'); // 'link' | 'laptop' | 'transcript'
 
   // User Preferences
   const [options, setOptions] = useState({
@@ -286,11 +288,12 @@ export default function App() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = (targetTab = 'link') => {
     setStatus('idle');
     setVideoData(null);
     setClips([]);
     setError(null);
+    setInitialInputTab(targetTab);
     try {
       localStorage.removeItem('clipscout_current_session_v3');
     } catch {}
@@ -339,7 +342,7 @@ export default function App() {
       {/* Top Header */}
       <Header
         clipsCount={clips.length}
-        onReset={handleReset}
+        onReset={() => handleReset('link')}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
@@ -356,6 +359,7 @@ export default function App() {
             isLoading={false}
             options={options}
             setOptions={setOptions}
+            initialTab={initialInputTab}
           />
         )}
 
@@ -366,7 +370,7 @@ export default function App() {
           <ProcessingState
             progress={progress}
             videoData={videoData}
-            onCancel={handleReset}
+            onCancel={() => handleReset('link')}
           />
         )}
 
@@ -383,12 +387,26 @@ export default function App() {
               <p className="text-sm text-zinc-400 leading-relaxed">
                 {error || 'An unexpected issue occurred while extracting clips from the source.'}
               </p>
-              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-2.5">
                 <button
-                  onClick={handleReset}
+                  onClick={() => handleReset('link')}
                   className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition"
                 >
-                  Try Another Video
+                  Try Another Link
+                </button>
+                <button
+                  onClick={() => handleReset('laptop')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-studio-800 hover:bg-studio-700 border border-studio-700 text-zinc-200 font-semibold text-sm transition flex items-center justify-center gap-2"
+                >
+                  <Laptop className="w-4 h-4 text-violet-400" />
+                  Upload Video File
+                </button>
+                <button
+                  onClick={() => handleReset('transcript')}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-studio-800 hover:bg-studio-700 border border-studio-700 text-zinc-200 font-semibold text-sm transition flex items-center justify-center gap-2"
+                >
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  Paste Transcript
                 </button>
               </div>
             </div>
