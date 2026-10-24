@@ -137,8 +137,15 @@ export default function App() {
         })
       });
 
+      if (!stage1Res.ok) {
+        const errText = await stage1Res.text();
+        let parsedErr = 'Failed to fetch source video. Please check the URL.';
+        try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
+        throw new Error(parsedErr);
+      }
+
       const stage1Data = await stage1Res.json();
-      if (!stage1Res.ok || !stage1Data.success) {
+      if (!stage1Data.success) {
         throw new Error(stage1Data.error || 'Failed to fetch source video. Please check the URL.');
       }
 
@@ -185,6 +192,13 @@ export default function App() {
           })
         });
 
+        if (!stage2Res.ok) {
+          const errText = await stage2Res.text();
+          let parsedErr = 'AI scoring temporarily unavailable. Please try again.';
+          try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
+          throw new Error(parsedErr);
+        }
+
         const stage2Data = await stage2Res.json();
         if (stage2Data.scoredWindows) {
           scoredWindows.push(...stage2Data.scoredWindows);
@@ -203,34 +217,55 @@ export default function App() {
 
       // -------------------------------------------------------------
       // STAGE 3: Sentence Snapping & YouTube Shorts Packaging
+      // Chunked into batches of 3 clips to eliminate serverless gateway timeouts
       // -------------------------------------------------------------
-      setProgress({ message: `Locking sentence boundaries and packaging ${topSelected.length} YouTube Shorts...`, percent: 75 });
+      const packageChunkSize = 3;
+      const generatedClips = [];
 
-      const stage3Res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: commonHeaders,
-        body: JSON.stringify({
-          action: 'package_clips',
-          video,
-          topCandidates: topSelected,
-          transcriptSegments,
-          campaign: {
-            minClipSec,
-            maxClipSec,
-            focus: options.focus
-          }
-        })
-      });
+      for (let i = 0; i < topSelected.length; i += packageChunkSize) {
+        const chunkCandidates = topSelected.slice(i, i + packageChunkSize);
+        const percent = Math.min(95, 70 + Math.round(((i + chunkCandidates.length) / topSelected.length) * 25));
+        setProgress({ 
+          message: `Locking sentence boundaries and packaging Shorts (${Math.min(i + chunkCandidates.length, topSelected.length)} of ${topSelected.length})...`, 
+          percent 
+        });
 
-      const stage3Data = await stage3Res.json();
-      if (!stage3Res.ok || !stage3Data.success) {
-        throw new Error(stage3Data.error || 'Failed to package YouTube Shorts clips.');
+        const stage3Res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: commonHeaders,
+          body: JSON.stringify({
+            action: 'package_clips',
+            video,
+            topCandidates: chunkCandidates,
+            transcriptSegments,
+            campaign: {
+              minClipSec,
+              maxClipSec,
+              focus: options.focus
+            }
+          })
+        });
+
+        if (!stage3Res.ok) {
+          const errText = await stage3Res.text();
+          let parsedErr = 'Failed to package YouTube Shorts clips.';
+          try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
+          throw new Error(parsedErr);
+        }
+
+        const stage3Data = await stage3Res.json();
+        if (stage3Data.clips && Array.isArray(stage3Data.clips)) {
+          generatedClips.push(...stage3Data.clips);
+        }
       }
 
-      const generatedClips = stage3Data.clips || [];
       if (generatedClips.length === 0) {
         throw new Error('No clips could be successfully formed.');
       }
+
+      // Re-rank and sort descending by virality
+      generatedClips.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
+      generatedClips.forEach((c, idx) => { c.rank = idx + 1; });
 
       setProgress({ message: 'Clips ready!', percent: 100 });
       setClips(generatedClips);
