@@ -217,9 +217,9 @@ export default function App() {
 
       // -------------------------------------------------------------
       // STAGE 3: Sentence Snapping & YouTube Shorts Packaging
-      // Chunked into batches of 3 clips to eliminate serverless gateway timeouts
+      // Chunked into pairs (2 clips per call, ~3.5s) to stay safely under serverless timeout limits
       // -------------------------------------------------------------
-      const packageChunkSize = 3;
+      const packageChunkSize = 2;
       const generatedClips = [];
 
       for (let i = 0; i < topSelected.length; i += packageChunkSize) {
@@ -230,37 +230,38 @@ export default function App() {
           percent 
         });
 
-        const stage3Res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: commonHeaders,
-          body: JSON.stringify({
-            action: 'package_clips',
-            video,
-            topCandidates: chunkCandidates,
-            transcriptSegments,
-            campaign: {
-              minClipSec,
-              maxClipSec,
-              focus: options.focus
+        try {
+          const stage3Res = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: commonHeaders,
+            body: JSON.stringify({
+              action: 'package_clips',
+              video,
+              topCandidates: chunkCandidates,
+              transcriptSegments,
+              campaign: {
+                minClipSec,
+                maxClipSec,
+                focus: options.focus
+              }
+            })
+          });
+
+          if (stage3Res.ok) {
+            const stage3Data = await stage3Res.json();
+            if (stage3Data.clips && Array.isArray(stage3Data.clips)) {
+              generatedClips.push(...stage3Data.clips);
             }
-          })
-        });
-
-        if (!stage3Res.ok) {
-          const errText = await stage3Res.text();
-          let parsedErr = 'Failed to package YouTube Shorts clips.';
-          try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
-          throw new Error(parsedErr);
-        }
-
-        const stage3Data = await stage3Res.json();
-        if (stage3Data.clips && Array.isArray(stage3Data.clips)) {
-          generatedClips.push(...stage3Data.clips);
+          } else {
+            console.warn(`Packaging chunk ${i} returned status ${stage3Res.status}`);
+          }
+        } catch (chunkErr) {
+          console.warn(`Chunk packaging warning for batch starting at ${i}:`, chunkErr);
         }
       }
 
       if (generatedClips.length === 0) {
-        throw new Error('No clips could be successfully formed.');
+        throw new Error('No clips could be successfully formed. Please try another focus option.');
       }
 
       // Re-rank and sort descending by virality
