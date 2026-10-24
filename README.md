@@ -1,4 +1,4 @@
-# 🎬 ClipScout — AI YouTube Shorts & Livestream Clipper
+# 🎬 ClipScout — Content Rewards Clipping Assistant
 
 > **🌐 Live Production URL:** [https://clipscout-ai.netlify.app](https://clipscout-ai.netlify.app)  
 > **📦 GitHub Repository:** [https://github.com/dinil2/clipScout](https://github.com/dinil2/clipScout)
@@ -6,65 +6,65 @@
 ---
 
 ## 🌟 Overview
-**ClipScout** is a high-performance creator productivity tool that extracts viral moments from long-form YouTube videos and multi-hour livestreams, automatically packaging them into ready-to-publish YouTube Shorts with hook titles, descriptions, hashtags, AI virality scoring, and 1-click **1080p clip downloading**.
+**ClipScout** is a high-reliability, zero-hallucination **Content Rewards clipping assistant** designed for creators participating in payout campaigns (such as ContentRewards.com).
 
-Designed to be lightweight, fast, and completely ephemeral — **no accounts, no database, zero storage costs**.
+Unlike generic AI clipping tools that fabricate timestamps, guess story arcs, or pad fake virality scores, ClipScout:
+1. Grounded strictly in authentic spoken transcripts (YouTube captions, or user-pasted / uploaded `.srt`, `.vtt`, `.txt` files).
+2. Uses sliding windows across **100% of the transcript timeline** rather than discarding 95% of speech.
+3. Scores moments deterministically using 4 distinct sub-scores (Hook, Standalone Clarity, Emotion & Payoff, Campaign Fit).
+4. Snaps clip boundaries to real sentence edges and enforces campaign duration limits (15–58s).
+5. Validates every clip against campaign rules: required hashtags, required @mentions, and banned words.
+6. Generates authentic `.SRT` subtitle tracks derived exclusively from real spoken words.
+7. Tracks clips across workflow states (*Found*, *Editing*, *Posted*, *Submitted*) and calculates estimated view-based earnings against campaign CPM rates and per-clip caps.
 
 ---
 
 ## 🚀 Key Features
 
-- **Hook-First Virality Scoring (0–100)**: Evaluates dialogue pacing, 3-second hook strength, punchlines, and emotional peaks with editorial reasoning.
-- **Strict 15–58s Limits**: Guarantees candidate moments never exceed YouTube Shorts' 60-second limit and form complete, self-contained story beats.
-- **⚡ Direct 1080p Clip Downloads**: Downloads **only the exact 15–58s slice** in high-definition 1080p directly to your computer using selective HTTP range requests — eliminating the need to download 5–10 GB livestream files.
-- **⚡ Livestream Story Arc Milestone Engine**: Automatically handles recent livestreams and videos where YouTube has not yet processed captions by mapping creator milestone arcs across the stream duration.
-- **Smart Timeline-Stride Transcript Condenser**: Intelligently compresses massive multi-hour transcripts down to ~900 high-density words (~1,200 tokens), preventing rate limits and token exhaustion.
-- **1-Click YouTube Studio Kit**: Individual copy buttons for titles, descriptions, and hashtags, plus a **"Copy All"** button for instant pasting into YouTube Studio.
-- **Persistent Local History**: Stores recent video analyses in browser `localStorage` for instant re-opening without re-querying the API.
+- **🎯 Campaign-Driven Evaluation**: Set rules, CPM rates, per-clip caps, required hashtags/mentions, and banned topics. The active campaign guides AI prompt scoring, boundary snapping, and compliance validation.
+- **🛡️ Zero Hallucinations**: No fake padding, no default scores, no canned text. If a YouTube video lacks captions, the app honestly informs the user and invites them to paste or upload a transcript.
+- **🔍 4-Factor Virality Sub-Scores (AI Estimate)**: Evaluates:
+  - *Hook* (0–25)
+  - *Standalone Clarity* (0–25)
+  - *Emotion & Payoff* (0–25)
+  - *Campaign Fit* (0–25)
+  - *Composite Score* (0–100) calculated deterministically in code.
+- **✂️ Sentence Boundary Snapping**: Refines raw start and end timestamps to natural sentence endings and speech pauses within ~3 seconds.
+- **📋 Campaign Compliance Checklist**: Immediate pass/fail indicator per clip checking duration limits, required tags, required @mentions, and banned words.
+- **📊 Earnings & Workflow Tracker**: Record posted clip URLs and views to track actual estimated earnings (`views / 1000 * CPM`), capped at the campaign maximum.
+- **💾 Offline JSON Backup & Privacy**: All campaign data and clip tracking stays private in your browser's `localStorage`. Includes one-click JSON export and import backups.
+- **🔐 Quota Protection**: Optional shared passcode protection (`APP_PASSCODE` in Netlify, `x-app-passcode` header) and origin-restricted CORS prevent unauthorized spending of your LLM quota.
+- **⚡ Safe Clip Export**: Production provides copy-ready `yt-dlp` CLI commands for selective 1080p downloads. Direct local 1080p MP4 download via Python + FFmpeg is supported in dev with `VITE_ENABLE_LOCAL_DOWNLOAD=true`.
 
 ---
 
-## 🛠️ Architecture & Technologies Used
+## 🛠️ Architecture
 
 ```
 ┌────────────────────────────────────────────────────────┐
 │                   ClipScout Frontend                   │
-│         React 18 + Vite + Tailwind CSS (Dark)          │
+│      React 18 + Vite + Tailwind CSS (Studio Dark)      │
+│  [Campaign Brief] -> [Source Input] -> [Clips] -> [Tracker]
 └───────────────▲────────────────────────▲───────────────┘
                 │                        │
-        POST /api/analyze        GET /api/download
+         POST /api/analyze        GET /api/download
                 │                        │
 ┌───────────────▼───────────────┐ ┌──────▼───────────────┐
-│     Netlify Serverless Fn     │ │ Python 1080p Clipper │
-│      (analyze.js / Node)      │ │  (server/clipper.py) │
+│     Netlify Serverless Fn     │ │ Safe Download Helper │
+│ (netlify/functions/analyze.js)│ │ (download.js / CLI)  │
 ├───────────────────────────────┤ ├──────────────────────┤
-│ 1. YouTube oEmbed (Metadata)  │ │ • yt-dlp             │
-│ 2. youtube-transcript (Subs)  │ │ • FFmpeg 9.0         │
-│ 3. Timeline-Stride Condenser  │ │ • HTTP Range Slicing │
-│ 4. Groq Cloud / Gemini REST   │ │ • Direct MP4 Stream  │
-└───────────────────────────────┘ └──────────────────────┘
+│ • Auth & Passcode Guard       │ │ • yt-dlp CLI command │
+│ • oEmbed Metadata Fetcher     │ │ • Dev-only Python    │
+│ • Universal Transcript Normal.│ │   clipper bridge     │
+│ • 90s/30s Sliding Windows     │ │   (server/clipper.py)│
+│ • Heuristic Pre-Ranking (25)  │ └──────────────────────┘
+│ • Groq Cloud / Gemini REST    │
+│ • Zod Strict Schema Check     │
+│ • Anti-Hallucination Verify   │
+│ • Sentence Boundary Snapping  │
+│ • Campaign Rules Validator    │
+└───────────────────────────────┘
 ```
-
-### 1. Frontend: React + Vite + Tailwind CSS
-- **React 18**: Component-driven UI managing asynchronous analysis states (Idle, Loading with skeleton cards and stepped messages, Error, and Success).
-- **Vite 6**: Ultra-fast bundler providing lightning-fast HMR and custom local development middleware simulating Netlify functions.
-- **Tailwind CSS**: Custom "Studio Darkroom" color palette (`#07080a` onyx, slate zincs, amber accents, and emerald virality badges) designed specifically for video editors.
-- **Lucide React**: Clean, accessible iconography for clipboard copy, YouTube links, and download status.
-
-### 2. Backend & Serverless API: Netlify Functions
-- **Serverless Endpoint (`/netlify/functions/analyze.js`)**: Executes ephemerally on-demand with zero persistent server maintenance.
-- **YouTube oEmbed API**: Public API endpoint fetching video title, channel name, and high-resolution thumbnail with zero credentials required.
-- **`youtube-transcript`**: Directly scrapes and normalizes timed subtitles (`{ text, offset, duration }`) across multi-language tracks.
-
-### 3. Artificial Intelligence: Groq Cloud LLM
-- **Model**: `openai/gpt-oss-120b` (with automatic failover to `openai/gpt-oss-20b` and `qwen/qwen3.8-27b`).
-- **Dual Support**: Also supports **Google Gemini (`gemini-2.5-flash`)** via direct REST calls.
-- **Structured JSON Mode**: Enforces strict JSON output conforming to `{ clips: [{ startTime, endTime, title, description, hashtags, viralityScore, reasoning }] }`.
-- **Timeline-Stride Condensation**: Overcomes free-tier token limits (8,000 TPM) by downsampling dialogue clusters evenly across the video timeline, allowing 3-hour streams to be analyzed in under 3 seconds.
-
-### 4. Direct 1080p Slicer: Python 3.12 + `yt-dlp` + FFmpeg
-- **`server/clipper.py`**: A specialized Python worker utilizing `yt-dlp`'s `download_ranges` callback and FFmpeg keyframe cutting.
-- **Zero Waste**: Uses HTTP range requests to download **only the required seconds of video** rather than the entire multi-gigabyte source file, outputting high-definition MP4 files in seconds.
 
 ---
 
@@ -72,8 +72,8 @@ Designed to be lightweight, fast, and completely ephemeral — **no accounts, no
 
 ### Prerequisites
 - **Node.js** (v18 or higher)
-- **Python 3.10+** (with `pip install yt-dlp`)
-- **FFmpeg** (installed and added to PATH)
+- **npm** (v9 or higher)
+- *(Optional for local 1080p dev downloads)*: **Python 3.10+**, `yt-dlp`, and **FFmpeg** in PATH.
 
 ### 1. Clone the Repository
 ```bash
@@ -81,24 +81,30 @@ git clone https://github.com/dinil2/clipScout.git
 cd clipScout
 ```
 
-### 2. Install Node Dependencies
+### 2. Install Dependencies
 ```bash
 npm install
 ```
 
-### 3. Install Python Dependencies
-```bash
-python -m pip install yt-dlp
-```
-
-### 4. Configure Environment Variables
-Create a `.env` file in the root directory:
+### 3. Configure Environment Variables
+Create a `.env` file in the project root:
 ```env
 # Groq API Key (from console.groq.com)
-GROQ_API_KEY=your_groq_api_key_here
+GROQ_API_KEY=gsk_your_groq_api_key_here
 
 # Optional: Google Gemini API Key
 GEMINI_API_KEY=
+
+# Optional: Shared passcode protecting API calls
+APP_PASSCODE=
+
+# Optional: Enable local 1080p download via Python clipper (dev-only)
+VITE_ENABLE_LOCAL_DOWNLOAD=false
+```
+
+### 4. Run Unit Tests
+```bash
+npm test
 ```
 
 ### 5. Launch Local Dev Server
@@ -111,17 +117,32 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 
 ## 🌐 Deployment to Netlify
 
-1. Fork or push this repository to GitHub / GitLab.
-2. In Netlify, click **"Add new site" > "Import an existing project"**.
-3. Select your repository. Netlify will auto-detect settings from `netlify.toml`:
+1. Push your repository to GitHub.
+2. In the Netlify dashboard, select **"Import from Git"**.
+3. Build configuration (configured in `netlify.toml`):
    - **Build command**: `npm run build`
    - **Publish directory**: `dist`
    - **Functions directory**: `netlify/functions`
-4. In **Site Configuration > Environment Variables**, add:
-   - `GROQ_API_KEY` = your Groq API key
-5. Click **Deploy**. Your site will be live immediately!
+4. Set Environment Variables in Netlify **Site Configuration > Environment Variables**:
+   - `GROQ_API_KEY`: Your Groq API key
+   - `APP_PASSCODE`: *(Optional)* Secret passcode required to invoke analysis
+5. Deploy the site.
+
+---
+
+## 🧪 Testing
+
+ClipScout includes a comprehensive test suite powered by **Vitest**:
+```bash
+npm test
+```
+Tests cover:
+- `tests/transcriptParser.test.js`: YouTube offset normalization, SRT, VTT, and relative `.srt` clip generation.
+- `tests/snapping.test.js`: Sentence boundary snapping, tolerance windows, and duration constraints.
+- `tests/scoring.test.js`: Deterministic composite scoring, sub-score clamps, and CPM earnings caps.
+- `tests/rulesCheck.test.js`: Compliance validation for durations, required hashtags, mentions, and banned words.
 
 ---
 
 ## 📜 License
-MIT License. Built for creators and clippers.
+MIT License. Built for creator productivity and Content Rewards clippers.

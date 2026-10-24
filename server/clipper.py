@@ -1,3 +1,12 @@
+"""
+ClipScout - Local-Only Clip Slicer
+NOTE: LOCAL-ONLY DEV UTILITY.
+This script requires a local Python 3.10+ runtime with yt-dlp and FFmpeg installed.
+It is never executed in Netlify serverless production functions.
+In local development, it is invoked via Vite dev middleware when VITE_ENABLE_LOCAL_DOWNLOAD=true.
+In production, ClipScout exports the equivalent yt-dlp CLI command for creators.
+"""
+
 import sys
 import os
 import json

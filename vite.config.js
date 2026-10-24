@@ -87,6 +87,27 @@ export default defineConfig(({ command, mode }) => {
                 return;
               }
 
+              // Only invoke Python clipper if explicit dev flag is enabled
+              const isLocalDownloadEnabled = process.env.VITE_ENABLE_LOCAL_DOWNLOAD === 'true';
+              if (!isLocalDownloadEnabled) {
+                const { pathToFileURL } = await import('url');
+                const functionPath = path.resolve(process.cwd(), 'netlify/functions/download.js');
+                const functionUrl = pathToFileURL(functionPath).href + '?t=' + Date.now();
+                const { handler } = await import(functionUrl);
+                const response = await handler({
+                  httpMethod: req.method,
+                  queryStringParameters: Object.fromEntries(urlObj.searchParams.entries()),
+                  headers: req.headers
+                });
+
+                res.statusCode = response.statusCode || 200;
+                if (response.headers) {
+                  Object.entries(response.headers).forEach(([k, v]) => res.setHeader(k, v));
+                }
+                res.end(response.body);
+                return;
+              }
+
               const fs = await import('fs');
               const os = await import('os');
               const { spawn } = await import('child_process');

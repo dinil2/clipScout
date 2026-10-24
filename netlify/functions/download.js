@@ -1,14 +1,23 @@
 /**
  * Netlify Serverless Function: /api/download
- * Handles clip export and download helper for production Netlify deployment
+ * Generates exact yt-dlp CLI command for creators.
+ * Third-party downloader services removed for safety and honesty.
  */
+
+import { checkAuthAndRateLimit } from './lib/auth.js';
+import { formatSecondsToTimestamp } from '../../src/utils/youtube.js';
+
 export const handler = async (event) => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const auth = checkAuthAndRateLimit(event);
+  if (!auth.allowed) {
+    return {
+      statusCode: auth.statusCode || 403,
+      headers: auth.headers,
+      body: JSON.stringify({ error: auth.error || 'Access denied' })
+    };
+  }
+
+  const { headers } = auth;
 
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
@@ -22,37 +31,32 @@ export const handler = async (event) => {
   if (event.httpMethod === 'GET') {
     const params = event.queryStringParameters || {};
     videoId = (params.videoId || '').trim();
-    start = parseInt(params.start || '0');
-    end = parseInt(params.end || '30');
+    start = Math.max(0, parseInt(params.start || '0', 10));
+    end = Math.max(start + 5, parseInt(params.end || '30', 10));
     title = (params.title || 'clip').trim();
   } else if (event.httpMethod === 'POST') {
     try {
       const b = JSON.parse(event.body || '{}');
       videoId = (b.videoId || '').trim();
-      start = parseInt(b.start || '0');
-      end = parseInt(b.end || '30');
+      start = Math.max(0, parseInt(b.start || '0', 10));
+      end = Math.max(start + 5, parseInt(b.end || '30', 10));
       title = (b.title || 'clip').trim();
     } catch {}
   }
 
-  if (!videoId) {
+  if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
     return {
       statusCode: 400,
       headers,
-      body: JSON.stringify({ error: 'Missing or invalid videoId.' })
+      body: JSON.stringify({ error: 'Missing or invalid 11-character YouTube videoId.' })
     };
   }
 
-  function formatSec(s) {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  }
-
   const safeTitle = (title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 45);
-  const startStr = formatSec(start);
-  const endStr = formatSec(end);
+  const startStr = formatSecondsToTimestamp(start);
+  const endStr = formatSecondsToTimestamp(end);
 
+  // Exact yt-dlp command downloading only the designated section in 1080p
   const cliCommand = `yt-dlp --download-sections "*${startStr}-${endStr}" -f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best" "https://www.youtube.com/watch?v=${videoId}" -o "${safeTitle}.mp4"`;
 
   return {
@@ -60,7 +64,6 @@ export const handler = async (event) => {
     headers,
     body: JSON.stringify({
       success: true,
-      mode: 'web_options',
       videoId,
       start,
       end,
@@ -68,23 +71,7 @@ export const handler = async (event) => {
       title,
       cliCommand,
       youtubeUrl: `https://youtu.be/${videoId}?t=${start}`,
-      downloadServices: [
-        {
-          name: 'YT Cutter (Web Timestamp Trimmer)',
-          url: 'https://ytcutter.com/',
-          tip: 'Paste video link and set start/end timestamps directly online'
-        },
-        {
-          name: 'Cobalt Media (Lossless 1080p)',
-          url: 'https://cobalt.tools/',
-          tip: 'Paste video link for instant 1080p ad-free media download'
-        },
-        {
-          name: 'SaveFrom / ssYouTube',
-          url: `https://www.ssyoutube.com/watch?v=${videoId}`,
-          tip: 'Direct browser MP4 video grabber'
-        }
-      ]
+      notice: 'Only download sources the campaign and original creator authorize for clipping.'
     })
   };
 };

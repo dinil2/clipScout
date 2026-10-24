@@ -1,69 +1,28 @@
-# 🎬 ClipScout — AI YouTube Shorts Clipper
+# 🎬 ClipScout — Content Rewards Clipping Assistant
 
 > **🌐 Live Production URL:** [https://clipscout-ai.netlify.app](https://clipscout-ai.netlify.app)  
 > **📦 GitHub Repository:** [https://github.com/dinil2/clipScout](https://github.com/dinil2/clipScout)
 
 # **Role:**
-You are a senior full-stack engineer building a lightweight, single-purpose internal tool. Prioritize working functionality and clean code over visual flourish — this is a personal productivity tool, not a marketing site.
+You are a senior full-stack engineer and product designer maintaining a high-reliability creator productivity tool. Prioritize correctness, honest outputs grounded strictly in transcripts, and clean architecture over visual flourish or padded results.
 
 # **Objective:**
-Build "ClipScout" — a single-page web app where I paste any YouTube video/livestream URL, and it returns a ranked list of the best moments to cut into YouTube Shorts, each with a suggested timestamp range, title, description, hashtags, and an AI-estimated virality score. No login, no database, no user accounts — this is used by one person (me) only.
+Provide a simple, reliable **Content Rewards clipping assistant** for one user. For one active campaign at a time: take a source (YouTube link with captions, or a pasted/uploaded transcript), extract REAL clip moments from the actual transcript, produce campaign-compliant titles, captions, hashtags, subtitles, and editing cues, and track each clip from found to edited to posted to earnings.
 
 # **Context:**
-- Stack: React (Vite) + Tailwind CSS, deployed as a static site on Netlify with a single Netlify Function as the backend.
-- No Supabase, no auth, no persistent storage — everything happens in one request/response cycle. Optionally cache the last few results in the browser's localStorage so a refresh doesn't lose them, but this is not required to work.
-- AI backend: Google Gemini API via direct REST call (not the SDK, to avoid dependency/version drift) — `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=API_KEY`, with `generationConfig.responseMimeType` set to `application/json` so the model returns clean structured JSON.
-- The Gemini API key is read from `process.env.GEMINI_API_KEY` inside the Netlify Function only — it must never be sent to or embedded in the frontend bundle.
-- Transcript source: use the `youtube-transcript` npm package (no API key required) inside the Netlify Function to pull the timed transcript (array of `{ text, offset, duration }`) for the given video ID.
-- Video metadata (title, thumbnail, channel name): fetch from YouTube's public oEmbed endpoint `https://www.youtube.com/oembed?url=<VIDEO_URL>&format=json` — no API key required.
+- **Stack**: React 18 (Vite) + Tailwind CSS + Lucide Icons, deployed on Netlify with modular Netlify Serverless Functions (`/netlify/functions/analyze.js`, `/netlify/functions/download.js`).
+- **Data & Privacy**: Single user, no accounts, no remote database. All campaign configurations, custom rules, and clip earnings tracking persist in browser `localStorage` with offline JSON export/import backups.
+- **AI Backend**: Groq Cloud LLM (primary, e.g. `llama-3.3-70b-versatile` / `openai/gpt-oss-120b`) via REST API with exponential backoff on 429 rate limits; dual support for Google Gemini (`gemini-2.5-flash`) via direct REST call. Keys are read strictly from `process.env.GROQ_API_KEY` or `process.env.GEMINI_API_KEY` inside serverless functions and never bundled into frontend assets.
+- **Security**: Optional shared passcode protection via `APP_PASSCODE` env var and `x-app-passcode` request header. CORS restricted to the site's origin. In-memory IP rate limiting.
+- **Transcript Sources**: 
+  1. YouTube captions via `youtube-transcript` npm package.
+  2. Direct user paste or file upload (`.srt`, `.vtt`, `.txt`) parsed into a single normalized segment format `{ startSec, endSec, text }`.
+  - Zero hallucination guarantee: If a YouTube video lacks captions, the user is honestly notified and offered paste/upload input instead of inventing timestamps or dialogue.
+- **Video Metadata**: Fetched via YouTube public oEmbed endpoint `https://www.youtube.com/oembed?url=<URL>&format=json`.
+- **Download Strategy**: Production exports clean, copyable `yt-dlp` CLI commands with creator authorization notes. Direct 1080p MP4 download via `server/clipper.py` is a dev-only feature guarded by `VITE_ENABLE_LOCAL_DOWNLOAD=true`.
 
-# **Instructions:**
-
-## Instruction 1 — Project setup
-Scaffold a Vite + React + Tailwind project with a `/netlify/functions/analyze.js` serverless function and a `netlify.toml` that points the functions directory correctly and redirects `/api/*` to `/.netlify/functions/*`.
-
-## Instruction 2 — Landing UI
-Single page, dark theme, centered layout. At the top: app name "ClipScout", a one-line subtitle, and a single large input field for "Paste a YouTube video or livestream link" with an "Analyze" button. Validate that the pasted URL is a real YouTube URL (watch, youtu.be, or live URL formats) and extract the 11-character video ID from it before submitting. Show the fetched video thumbnail, title, and channel name above the results once analysis starts.
-
-## Instruction 3 — Backend function: `analyze.js`
-On POST, receive `{ videoId }`. Steps:
-1. Fetch metadata from the oEmbed endpoint.
-2. Fetch the transcript via `youtube-transcript`. If no transcript exists (captions disabled), return a clear error the frontend can display ("This video has no captions available, so it can't be analyzed").
-3. Build a single prompt for Gemini containing: the full timed transcript (formatted as `[mm:ss] text` per line) and the total video duration. Ask it to return 6–8 candidate Shorts clips as JSON, each 15–58 seconds long (never over 60s — YouTube Shorts' hard limit), non-overlapping where possible, chosen for hook strength, punchline/payoff, emotional peak, or a self-contained story beat.
-4. Require this exact JSON shape back from Gemini (use `responseSchema` if supported, otherwise strict prompt instructions):
-
-{
-"clips": [
-{
-"startTime": "mm:ss",
-"endTime": "mm:ss",
-"title": "string, under 60 chars, hook-driven",
-"description": "1-2 sentence YouTube Shorts description",
-"hashtags": ["#tag1", "#tag2", "..."],
-"viralityScore": 0-100,
-"reasoning": "one sentence on why this moment works"
-}
-]
-}
-
-5. Sort clips by `viralityScore` descending before returning them to the frontend, alongside the video metadata.
-
-## Instruction 4 — Results UI
-Render each clip as a card, ordered by score, in a vertical list:
-- A colored score badge (green ≥80, yellow 50-79, gray <50) labeled "AI Virality Score" (make clear in a small caption under the score that this is an AI estimate, not a guarantee).
-- The timestamp range in monospace, with a "▶ Preview on YouTube" link that opens `https://youtu.be/<videoId>?t=<startSeconds>` in a new tab.
-- Title, description, and hashtags, each with its own small copy-to-clipboard icon button, plus one "Copy all" button per card that copies title + description + hashtags together in one paste-ready block.
-- A brief italic line showing the `reasoning` field.
-
-## Instruction 5 — States
-Handle and visually design: idle (empty state with instructions), loading (skeleton cards + a short rotating status message like "Reading transcript…" → "Finding the best moments…"), error (invalid URL, no captions, API failure — each with a distinct friendly message), and success.
-
-## Instruction 6 — Deployment
-Ensure the app runs with `netlify dev` locally and builds cleanly with `netlify build`. Do not commit any API key — confirm `.env` is in `.gitignore` and document in a short README that `GEMINI_API_KEY` must be set in Netlify's environment variables before the function will work in production.
-
-# **Notes:**
-- Keep dependencies minimal: React, Tailwind, `youtube-transcript`, and native `fetch` — no extra state-management or UI libraries needed for a page this small.
-- Fast, selective 1080p clip download powered by Python 3.12 + yt-dlp + FFmpeg.
-- No authentication, no user accounts, no database — a single anonymous visitor flow only.
-- Must be usable comfortably from a phone browser, since I'll likely paste links on the go.
-- API Key configured in `.env` (GROQ_API_KEY) and Netlify environment variables.
+# **Core 3-Step Flow:**
+1. **Campaign Brief**: Set campaign rules, CPM rate, per-clip payout cap, duration limits, required hashtags, required @mentions, and banned words.
+2. **Source Input**: Provide a YouTube link (with captions) or paste/upload a transcript.
+3. **Clips & Package**: AI scores overlapping windows (0-25 across 4 sub-scores: Hook, Clarity, Emotion, Campaign Fit; composite 0-100 calculated in code). Top clips are snapped to real sentence boundaries, validated against campaign rules, and packaged with copy-ready metadata and authentic .SRT subtitles.
+4. **Tracker**: Track workflow status (Found, Editing, Posted, Submitted) and calculate estimated payouts based on real views.
