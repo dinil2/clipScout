@@ -9,6 +9,57 @@ import { normalizeYouTubeTranscript, cleanSubtitleText } from '../../../src/util
 const INNERTUBE_CLIENT_VERSION = '20.10.38';
 const INNERTUBE_USER_AGENT = `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`;
 
+let cachedVisitorData = null;
+let visitorDataExpiry = 0;
+
+/**
+ * Retrieves a fresh Google visitor token to pass YouTube's security handshakes
+ * @returns {Promise<string>}
+ */
+async function getVisitorData() {
+  const now = Date.now();
+  if (cachedVisitorData && now < visitorDataExpiry) {
+    return cachedVisitorData;
+  }
+
+  try {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/visitor_id', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': INNERTUBE_USER_AGENT
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: 'ANDROID',
+            clientVersion: INNERTUBE_CLIENT_VERSION,
+            androidSdkVersion: 34,
+            osName: 'Android',
+            osVersion: '14',
+            platform: 'MOBILE'
+          }
+        }
+      }),
+      signal: AbortSignal.timeout(3500)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const token = data?.responseContext?.visitorData;
+      if (token) {
+        cachedVisitorData = token;
+        visitorDataExpiry = now + (20 * 60 * 1000); // Cache for 20 mins
+        return token;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to obtain visitor token:', err.message);
+  }
+
+  return '';
+}
+
 /**
  * Fetches video metadata via public YouTube oEmbed endpoint with fallback
  * @param {string} videoId
@@ -47,27 +98,36 @@ export async function fetchYoutubeMetadata(videoId) {
 
 /**
  * Direct InnerTube Android client transcript extractor
- * Bypasses cloud datacenter IP blocks by utilizing native mobile player endpoints
+ * Bypasses cloud datacenter IP blocks by utilizing native mobile player endpoints with visitor context
  *
  * @param {string} videoId
  * @param {string} preferredLang
  * @returns {Promise<Array<{startSec: number, endSec: number, text: string}>>}
  */
 async function fetchInnerTubeTranscript(videoId, preferredLang = 'en') {
+  const visitorData = await getVisitorData();
+
+  const reqHeaders = {
+    'Content-Type': 'application/json',
+    'User-Agent': INNERTUBE_USER_AGENT,
+    ...(visitorData ? { 'X-Goog-Visitor-Id': visitorData } : {})
+  };
+
+  const clientContext = {
+    clientName: 'ANDROID',
+    clientVersion: INNERTUBE_CLIENT_VERSION,
+    androidSdkVersion: 34,
+    osName: 'Android',
+    osVersion: '14',
+    platform: 'MOBILE',
+    ...(visitorData ? { visitorData } : {})
+  };
+
   const resp = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent': INNERTUBE_USER_AGENT
-    },
+    headers: reqHeaders,
     body: JSON.stringify({
-      context: {
-        client: {
-          clientName: 'ANDROID',
-          clientVersion: INNERTUBE_CLIENT_VERSION,
-          androidSdkVersion: 34
-        }
-      },
+      context: { client: clientContext },
       videoId
     }),
     signal: AbortSignal.timeout(6000)
@@ -80,15 +140,29 @@ async function fetchInnerTubeTranscript(videoId, preferredLang = 'en') {
   const data = await resp.json();
   const playability = data?.playabilityStatus;
   if (playability && playability.status && playability.status !== 'OK') {
-    const reason = playability.reason || playability.messages?.[0] || 'This video is unavailable or restricted on YouTube.';
-    const err = new Error(reason);
+    const reason = playability.reason || playability.messages?.[0] || '';
+    const lowerReason = reason.toLowerCase();
+
+    if (lowerReason.includes('bot') || lowerReason.includes('sign in')) {
+      const botErr = new Error('YouTube bot-check restriction encountered for this video. Please upload the video file (.mp4, .mov) directly for Groq Whisper transcription, or paste the transcript.');
+      botErr.code = 'NO_CAPTIONS';
+      throw botErr;
+    }
+
+    if (lowerReason.includes('unavailable') || lowerReason.includes('private')) {
+      const privErr = new Error('This video is unavailable or private on YouTube. Please check the link.');
+      privErr.code = 'VIDEO_UNAVAILABLE';
+      throw privErr;
+    }
+
+    const err = new Error(reason || 'Video restricted on YouTube.');
     err.code = 'VIDEO_UNAVAILABLE';
     throw err;
   }
 
   const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
   if (!Array.isArray(tracks) || tracks.length === 0) {
-    const err = new Error('No closed captions or transcript tracks found for this video.');
+    const err = new Error('This video has no closed captions or transcript tracks available on YouTube. Please upload the video file (.mp4, .mov) directly for automatic speech-to-text with Groq Whisper, or paste the transcript.');
     err.code = 'NO_CAPTIONS';
     throw err;
   }
@@ -104,17 +178,22 @@ async function fetchInnerTubeTranscript(videoId, preferredLang = 'en') {
   if (!selectedTrack) selectedTrack = tracks[0];
 
   if (!selectedTrack || !selectedTrack.baseUrl) {
-    const err = new Error('No valid transcript track URL available.');
+    const err = new Error('No valid transcript track URL available from YouTube.');
     err.code = 'NO_CAPTIONS';
     throw err;
   }
+
+  const timedTextHeaders = {
+    'User-Agent': INNERTUBE_USER_AGENT,
+    ...(visitorData ? { 'X-Goog-Visitor-Id': visitorData } : {})
+  };
 
   // Attempt 1: Fetch via high-speed json3 format with Android User-Agent
   try {
     const jsonUrl = new URL(selectedTrack.baseUrl);
     jsonUrl.searchParams.set('fmt', 'json3');
     const cRes = await fetch(jsonUrl.toString(), {
-      headers: { 'User-Agent': INNERTUBE_USER_AGENT },
+      headers: timedTextHeaders,
       signal: AbortSignal.timeout(6000)
     });
 
@@ -147,7 +226,7 @@ async function fetchInnerTubeTranscript(videoId, preferredLang = 'en') {
   // Attempt 2: Fetch via srv3 XML format with Android User-Agent
   try {
     const xmlRes = await fetch(selectedTrack.baseUrl, {
-      headers: { 'User-Agent': INNERTUBE_USER_AGENT },
+      headers: timedTextHeaders,
       signal: AbortSignal.timeout(6000)
     });
 
@@ -176,14 +255,14 @@ async function fetchInnerTubeTranscript(videoId, preferredLang = 'en') {
  * @returns {Promise<Array<{startSec: number, endSec: number, text: string}>>}
  */
 export async function fetchYoutubeTranscript(videoId, preferredLang = 'en') {
-  // Strategy 1: Direct InnerTube Android client (reliable in cloud datacenter environments)
+  // Strategy 1: Direct InnerTube Android client with visitor context
   try {
     const segments = await fetchInnerTubeTranscript(videoId, preferredLang);
     if (segments && segments.length > 0) {
       return segments;
     }
   } catch (err) {
-    if (err.code === 'VIDEO_UNAVAILABLE') {
+    if (err.code === 'VIDEO_UNAVAILABLE' || err.code === 'NO_CAPTIONS') {
       throw err;
     }
     console.warn(`InnerTube fetch attempt failed for ${videoId}, trying library fallback:`, err.message);
@@ -215,7 +294,7 @@ export async function fetchYoutubeTranscript(videoId, preferredLang = 'en') {
   }
 
   // Final fallback error if all strategies yielded no usable segments
-  const customErr = new Error('This video has no captions available from YouTube, so it cannot be analyzed automatically. Please upload the video file (.mp4, .mov) directly for automatic speech-to-text or paste the transcript.');
+  const customErr = new Error('This video has no captions available from YouTube, so it cannot be analyzed automatically. Please upload the video file (.mp4, .mov) directly for automatic speech-to-text with Groq Whisper, or paste the transcript.');
   customErr.code = 'NO_CAPTIONS';
   throw customErr;
 }
