@@ -1,25 +1,20 @@
 /**
- * Campaign-Driven LLM Prompt Engineering Module
- * Grounded strictly in the source transcript and active campaign brief.
+ * Podcast-to-Shorts LLM Prompt Engineering Module
+ * Grounded strictly in the source transcript to extract high-retention viral moments.
  */
 
 import { formatSecondsToTimestamp } from '../../../src/utils/youtube.js';
 
 /**
- * Builds prompt for batch scoring candidate windows
+ * Builds prompt for batch scoring candidate windows from podcast transcript
  * @param {Array<Object>} windowsBatch
- * @param {Object} campaign
+ * @param {Object} options
  * @returns {string}
  */
-export function buildBatchScoringPrompt(windowsBatch, campaign = {}) {
-  const campaignContext = `CAMPAIGN BRIEF:
-- Campaign Name: ${campaign.name || 'Content Rewards Standard'}
-- Target Clip Length: ${campaign.minClipSec || 15} to ${campaign.maxClipSec || 58} seconds
-- Allowed Platforms: ${(campaign.allowedPlatforms || ['YouTube Shorts', 'TikTok']).join(', ')}
-- Required Hashtags: ${(campaign.requiredHashtags || []).join(' ')}
-- Required Mentions: ${(campaign.requiredMentions || []).join(' ')}
-- Banned Words (DO NOT USE): ${(campaign.bannedWords || []).join(', ')}
-- Campaign Rules & Objectives: ${campaign.rules || 'Find viral, standalone insights or engaging moments.'}`;
+export function buildBatchScoringPrompt(windowsBatch, options = {}) {
+  const minSec = options.minClipSec || 20;
+  const maxSec = options.maxClipSec || 58;
+  const focus = options.focus || 'viral_hooks';
 
   const windowsFormatted = windowsBatch.map((win, idx) => {
     return `[CANDIDATE WINDOW #${idx + 1} - ID: "${win.id}"]
@@ -28,86 +23,79 @@ TRANSCRIPT:
 "${win.text}"`;
   }).join('\n\n');
 
-  return `You are a professional video clipper and virality analyst for a creator Content Rewards campaign.
+  return `You are a world-class YouTube Shorts & TikTok viral content strategist and podcast editor (like OpusClip, Klap, Descript).
+Your goal is to extract the single most captivating, viral moments from this podcast transcript that will stop viewers from scrolling on YouTube Shorts.
 
-${campaignContext}
+TARGET CLIP LENGTH: ${minSec} to ${maxSec} seconds.
+CLIP FOCUS: ${focus === 'mindset' ? 'Deep mindset shifts, psychology & life wisdom' : focus === 'funny' ? 'Humor, unexpected banter & funny moments' : focus === 'debate' ? 'Hot takes, controversy & provocative arguments' : 'Maximum virality, curiosity gaps & high retention hooks'}
 
-TASK:
-Analyze the dialogue in each candidate window below. For each window, provide four sub-scores (each strictly an integer from 0 to 25):
-1. hook (0-25): Does it have a captivating opening hook in the first 3 seconds?
-2. standaloneClarity (0-25): Does it make complete sense on its own without requiring outside context?
-3. emotionPayoff (0-25): Does it deliver an emotional peak, twist, humor, or tangible insight?
-4. campaignFit (0-25): Does it align with the campaign brief and respect banned topic rules?
+EVALUATION CRITERIA (Provide 4 sub-scores from 0 to 25 each, totaling 0-100):
+1. hook (0-25): Does the opening 3 seconds grab immediate attention (provocative question, bold realization, or pattern interrupt)?
+2. standaloneClarity (0-25): Does this thought make complete, satisfying sense on its own without needing the full 2-hour podcast?
+3. emotionPayoff (0-25): Does it deliver an "aha!" moment, emotional punch, intense value, or shock factor?
+4. retentionLoop (0-25): Will viewers watch all the way to the end and share it on YouTube Shorts / TikTok?
 
 CRITICAL ANTI-HALLUCINATION RULES:
-- Ground every evaluation strictly in the provided transcript words.
-- Each item MUST include an "evidenceQuote": an exact verbatim quote of 3 to 10 words from that window's transcript.
-- "suggestedStartSec" and "suggestedEndSec" MUST fall strictly within that window's startSec and endSec, and span ${campaign.minClipSec || 15} to ${campaign.maxClipSec || 58} seconds.
+- Ground every single score strictly in the actual spoken transcript words provided.
+- Each evaluation MUST include an "evidenceQuote": an exact verbatim quote of 3 to 10 words from that candidate window.
+- "suggestedStartSec" and "suggestedEndSec" MUST fall strictly within that window's startSec and endSec, spanning between ${minSec} and ${maxSec} seconds.
 
 CANDIDATE WINDOWS:
 ${windowsFormatted}
 
-RETURN STRICT JSON ONLY:
+RETURN STRICT JSON ONLY (no markdown outside JSON):
 {
   "evaluations": [
     {
       "windowId": "${windowsBatch[0]?.id || 'win-1'}",
-      "hook": 21,
-      "standaloneClarity": 22,
-      "emotionPayoff": 20,
-      "campaignFit": 24,
-      "reasoning": "Clear opening hook followed by a concrete takeaway on creator growth.",
-      "evidenceQuote": "the exact words from transcript",
+      "hook": 24,
+      "standaloneClarity": 23,
+      "emotionPayoff": 22,
+      "retentionLoop": 23,
+      "reasoning": "Opens with an unforgettable hook about daily dopamine followed by a powerful life insight.",
+      "evidenceQuote": "exact verbatim words from transcript",
       "suggestedStartSec": ${windowsBatch[0]?.startSec || 0},
-      "suggestedEndSec": ${(windowsBatch[0]?.startSec || 0) + 30}
+      "suggestedEndSec": ${(windowsBatch[0]?.startSec || 0) + 38}
     }
   ]
 }`;
 }
 
 /**
- * Builds prompt for packaging a single refined clip with campaign-compliant metadata
+ * Builds prompt for packaging a single refined clip with ready-to-upload YouTube Studio metadata
  * @param {Object} clip
  * @param {string} transcriptSlice
- * @param {Object} campaign
+ * @param {Object} options
  * @returns {string}
  */
-export function buildClipPackagingPrompt(clip, transcriptSlice, campaign = {}) {
-  const reqTags = (campaign.requiredHashtags || []).filter(Boolean);
-  const reqMentions = (campaign.requiredMentions || []).filter(Boolean);
+export function buildClipPackagingPrompt(clip, transcriptSlice, options = {}) {
+  const minSec = Math.round(clip.durationSec || 35);
 
-  return `You are an elite YouTube Shorts / TikTok editor.
-Package this exact video clip for publication in accordance with the campaign brief.
+  return `You are an elite YouTube Shorts producer and copywriter.
+Package this exact podcast clip with everything needed for the creator to copy and paste directly into YouTube Studio.
 
-CAMPAIGN BRIEF:
-- Campaign: ${campaign.name || 'Content Rewards'}
-- Required Hashtags (MUST include all): ${reqTags.join(' ')}
-- Required Mentions (MUST include all): ${reqMentions.join(' ')}
-- Banned Words (NEVER include): ${(campaign.bannedWords || []).join(', ')}
-- Campaign Rules: ${campaign.rules || 'Focus on high retention and engagement.'}
-
-CLIP TIME RANGE: ${formatSecondsToTimestamp(clip.startSec)} to ${formatSecondsToTimestamp(clip.endSec)} (${Math.round(clip.durationSec)}s)
+CLIP TIME RANGE: ${formatSecondsToTimestamp(clip.startSec)} to ${formatSecondsToTimestamp(clip.endSec)} (${minSec}s)
 EXACT TRANSCRIPT SLICE:
 "${transcriptSlice}"
 
 TASK:
-Generate a publication-ready package:
-1. hookText: Punchy 3-second on-screen text overlay for the video editor (under 40 chars).
-2. title: Hook-driven title under 60 characters. Include ${reqMentions.join(' ')} if natural or append.
-3. description: 1-2 sentence description summarizing the clip. Include ${reqMentions.join(' ')}.
-4. hashtags: Array of hashtags including ${reqTags.join(', ')} plus 2-3 trending relevant tags.
-5. pinnedComment: Engaging comment asking viewers a question to drive algorithm comments.
-6. editingTip: Actionable editing instruction for CapCut/Premiere (zoom, sound effect, pace).
-7. evidenceQuote: A verbatim 3-8 word quote from the transcript slice confirming authenticity.
+Generate a complete, high-CTR YouTube Shorts metadata package:
+1. hookText: Punchy 3-5 word on-screen text overlay for the video hook (under 35 chars, e.g. "The Truth About Success 🧠").
+2. title: High-CTR, curiosity-driven YouTube Shorts title under 60 characters with emojis and ending with #Shorts (e.g. "The 1 Habit That Changed Everything 🧠 #Shorts").
+3. description: Engaging 2-sentence description summarizing the core lesson/hook, including quotation of the best line, and ending with hashtags.
+4. trendingHashtags: Array of 6 to 8 trending, high-traffic hashtags relevant to the topic (always include "#shorts", "#podcast", plus 4-6 specific tags like "#mindset", "#success", etc.).
+5. pinnedComment: A high-engagement question to pin in the comments that forces viewers to reply and debate.
+6. editingTip: Actionable editing instruction for CapCut/Premiere (e.g., "Add fast punch-in zoom at 0:02 on key realization, use bold yellow captions center-screen").
+7. evidenceQuote: A verbatim 3 to 8 word quote from the transcript slice confirming authenticity.
 
 RETURN STRICT JSON ONLY:
 {
-  "hookText": "Short text for video overlay",
-  "title": "Title under 60 chars",
-  "description": "Shorts description with ${reqMentions[0] || '@brand'}",
-  "hashtags": [${reqTags.map(t => `"${t}"`).join(', ')}],
-  "pinnedComment": "Question to spark discussion in comments?",
-  "editingTip": "Punch-in zoom 1.2x at 0:02 on key phrase",
+  "hookText": "On-screen hook under 35 chars",
+  "title": "Viral Hook Title Under 60 chars ⚡ #Shorts",
+  "description": "Engaging description ready for YouTube Studio.\\n\\nWatch till the end for the full takeaway.",
+  "trendingHashtags": ["#shorts", "#podcast", "#mindset", "#viral", "#motivation", "#lifeadvice"],
+  "pinnedComment": "Do you agree with this? Let me know in the comments 👇",
+  "editingTip": "Punch-in zoom 1.15x at 0:02 on speaker realization. Use center yellow captions.",
   "evidenceQuote": "exact quote from transcript"
 }`;
 }

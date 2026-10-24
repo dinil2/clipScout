@@ -87,8 +87,8 @@ export default defineConfig(({ command, mode }) => {
                 return;
               }
 
-              // Only invoke Python clipper if explicit dev flag is enabled
-              const isLocalDownloadEnabled = process.env.VITE_ENABLE_LOCAL_DOWNLOAD === 'true';
+              // In local dev server (command === 'serve'), local download via Python/yt-dlp is enabled by default
+              const isLocalDownloadEnabled = process.env.VITE_ENABLE_LOCAL_DOWNLOAD !== 'false';
               if (!isLocalDownloadEnabled) {
                 const { pathToFileURL } = await import('url');
                 const functionPath = path.resolve(process.cwd(), 'netlify/functions/download.js');

@@ -1,116 +1,81 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Header from './components/Header.jsx';
-import CampaignBrief from './components/CampaignBrief.jsx';
-import SourceStep from './components/SourceStep.jsx';
+import HeroInput from './components/HeroInput.jsx';
+import ProcessingState from './components/ProcessingState.jsx';
 import VideoBanner from './components/VideoBanner.jsx';
-import TimelineBar from './components/TimelineBar.jsx';
 import ClipCard from './components/ClipCard.jsx';
-import TrackerTab from './components/TrackerTab.jsx';
+import DownloadModal from './components/DownloadModal.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
-import { LoadingState, ErrorState, EmptyClipsState } from './components/StatusStates.jsx';
 import Toast from './components/Toast.jsx';
 import { 
-  SlidersHorizontal, Download, Scissors, AlertCircle, 
-  RotateCcw, Sparkles, Filter 
+  Sparkles, Flame, Clock, Scissors, SlidersHorizontal, 
+  RotateCcw, AlertCircle, Share2, Download, Copy, Check 
 } from 'lucide-react';
 
-import { DEFAULT_CAMPAIGN, CLIP_STATUSES } from './utils/constants.js';
-import { 
-  loadCampaigns, 
-  saveCampaigns, 
-  loadActiveCampaignId, 
-  saveActiveCampaignId, 
-  loadTrackerClips, 
-  saveTrackerClips, 
-  upsertTrackerClip,
-  loadUserPasscode 
-} from './utils/storage.js';
+import { loadUserPasscode } from './utils/storage.js';
 
 export default function App() {
-  // Navigation & Tabs: 'campaign' | 'source' | 'clips' | 'tracker'
-  const [activeTab, setActiveTab] = useState('campaign');
-
-  // Campaigns State
-  const [campaigns, setCampaigns] = useState(() => loadCampaigns());
-  const [activeCampaignId, setActiveCampaignId] = useState(() => loadActiveCampaignId(campaigns));
-
-  // Current Active Campaign
-  const activeCampaign = useMemo(() => {
-    return campaigns.find(c => c.id === activeCampaignId) || campaigns[0] || DEFAULT_CAMPAIGN;
-  }, [campaigns, activeCampaignId]);
-
-  // Analysis State
+  // Main State
   const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
   const [progress, setProgress] = useState({ message: '', percent: 0 });
   const [error, setError] = useState(null);
-  const [captionError, setCaptionError] = useState(null);
-  const [lastSourcePayload, setLastSourcePayload] = useState(null);
 
-  // Results & Video Metadata
+  // Video & Clips Data
   const [videoData, setVideoData] = useState(null);
   const [clips, setClips] = useState([]);
-  const [clipCount, setClipCount] = useState(10);
-  const [sortOption, setSortOption] = useState('virality'); // 'virality' | 'chronological' | 'shortest' | 'longest'
+  const [sortOption, setSortOption] = useState('virality'); // 'virality' | 'chronological' | 'duration'
 
-  // Tracker State
-  const [trackerClips, setTrackerClips] = useState(() => loadTrackerClips());
+  // User Preferences
+  const [options, setOptions] = useState({
+    duration: '30-60', // '15-30' | '30-60' | '60-90'
+    clipCount: 5,      // 3 | 5 | 8
+    focus: 'viral_hooks' // 'viral_hooks' | 'mindset' | 'funny' | 'debate'
+  });
 
-  // UI Modals & Alerts
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Modals & Feedback
   const [toastMessage, setToastMessage] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [downloadModal, setDownloadModal] = useState({ isOpen: false, clip: null, videoId: null });
+  const [copiedAllBatch, setCopiedAllBatch] = useState(false);
 
-  // Sync campaigns changes
-  const handleSaveCampaign = (updatedCampaign) => {
-    const updated = campaigns.map(c => c.id === updatedCampaign.id ? updatedCampaign : c);
-    setCampaigns(updated);
-    saveCampaigns(updated);
-    showToast(`Saved campaign "${updatedCampaign.name}"`);
-  };
+  // Restore cached clips from localStorage on load
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('clipscout_current_session_v3');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.videoData && parsed.clips?.length > 0) {
+          setVideoData(parsed.videoData);
+          setClips(parsed.clips);
+          setStatus('success');
+        }
+      }
+    } catch {}
+  }, []);
 
-  const handleCreateCampaign = () => {
-    const newId = `campaign-${Date.now()}`;
-    const newCamp = {
-      ...DEFAULT_CAMPAIGN,
-      id: newId,
-      name: `Campaign #${campaigns.length + 1}`
-    };
-    const next = [...campaigns, newCamp];
-    setCampaigns(next);
-    saveCampaigns(next);
-    setActiveCampaignId(newId);
-    saveActiveCampaignId(newId);
-    showToast('Created new campaign');
-  };
-
-  const handleDeleteCampaign = (idToDelete) => {
-    if (campaigns.length <= 1) return;
-    const next = campaigns.filter(c => c.id !== idToDelete);
-    setCampaigns(next);
-    saveCampaigns(next);
-    const nextActive = next[0].id;
-    setActiveCampaignId(nextActive);
-    saveActiveCampaignId(nextActive);
-    showToast('Campaign deleted');
-  };
-
-  const handleSelectCampaign = (id) => {
-    setActiveCampaignId(id);
-    saveActiveCampaignId(id);
-  };
+  // Save session when clips update
+  useEffect(() => {
+    if (status === 'success' && videoData && clips.length > 0) {
+      try {
+        localStorage.setItem('clipscout_current_session_v3', JSON.stringify({
+          videoData,
+          clips
+        }));
+      } catch {}
+    }
+  }, [status, videoData, clips]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
   };
 
   // -------------------------------------------------------------
-  // Multi-Stage Orchestrated Analysis Pipeline
+  // Pipeline: Fetch Source -> Score Candidate Windows -> Package Shorts
   // -------------------------------------------------------------
-  const executePipeline = async (sourcePayload) => {
+  const handleAnalyze = async (sourcePayload) => {
     setStatus('loading');
     setError(null);
-    setCaptionError(null);
-    setLastSourcePayload(sourcePayload);
-    setActiveTab('clips');
+    setProgress({ message: 'Connecting to video source...', percent: 10 });
 
     const userPasscode = loadUserPasscode();
     const commonHeaders = {
@@ -119,168 +84,127 @@ export default function App() {
     };
 
     try {
-      // ---------------------------------------------------------
-      // STAGE 1: Fetch source metadata & sliding candidate windows
-      // ---------------------------------------------------------
-      setProgress({
-        message: 'Step 1/3: Parsing transcript & pre-ranking candidate moments in code...',
-        percent: 25
-      });
+      // -------------------------------------------------------------
+      // STAGE 1: Fetch Video Metadata & Real Speech Segments
+      // -------------------------------------------------------------
+      setProgress({ message: 'Fetching video metadata and speech transcript...', percent: 20 });
 
-      const stage1Body = {
-        action: 'fetch_source',
-        campaign: activeCampaign,
-        ...(sourcePayload.type === 'youtube'
-          ? { videoId: sourcePayload.videoId }
-          : {
-              transcriptText: sourcePayload.transcriptText,
-              title: sourcePayload.title,
-              author: sourcePayload.author,
-              fileType: sourcePayload.fileType
-            })
-      };
+      // Determine duration constraints from options
+      let minClipSec = 30;
+      let maxClipSec = 58;
+      if (options.duration === '15-30') {
+        minClipSec = 15;
+        maxClipSec = 30;
+      } else if (options.duration === '60-90') {
+        minClipSec = 58;
+        maxClipSec = 90;
+      }
 
-      const res1 = await fetch('/api/analyze', {
+      const stage1Res = await fetch('/api/analyze', {
         method: 'POST',
         headers: commonHeaders,
-        body: JSON.stringify(stage1Body)
+        body: JSON.stringify({
+          action: 'fetch_source',
+          ...sourcePayload,
+          campaign: {
+            minClipSec,
+            maxClipSec,
+            focus: options.focus
+          }
+        })
       });
 
-      const data1 = await res1.json();
-
-      if (!res1.ok || data1.error) {
-        if (data1.code === 'NO_CAPTIONS') {
-          setCaptionError(data1.error);
-          setActiveTab('source');
-          setStatus('idle');
-          return;
-        }
-        throw new Error(data1.error || 'Failed to fetch source transcript.');
+      const stage1Data = await stage1Res.json();
+      if (!stage1Res.ok || !stage1Data.success) {
+        throw new Error(stage1Data.error || 'Failed to fetch source video. Please check the URL.');
       }
 
-      setVideoData(data1.video);
-      const { transcriptSegments, candidateWindows } = data1;
+      const { video, transcriptSegments, candidateWindows } = stage1Data;
+      setVideoData(video);
 
       if (!candidateWindows || candidateWindows.length === 0) {
-        throw new Error('No candidate speech moments could be extracted from this transcript.');
+        throw new Error('No spoken dialogue or candidate clips found in source transcript.');
       }
 
-      // ---------------------------------------------------------
-      // STAGE 2: Batch score candidate windows with AI
-      // ---------------------------------------------------------
-      setProgress({
-        message: 'Step 2/3: AI evaluating candidate moments across 4 virality sub-scores...',
-        percent: 55
+      // -------------------------------------------------------------
+      // STAGE 2: Score Candidate Windows with LLM
+      // -------------------------------------------------------------
+      setProgress({ message: 'AI analyzing full conversation for high-retention hooks...', percent: 45 });
+
+      // Take top candidate batch (limit to 6 for speed and quota efficiency)
+      const topBatch = candidateWindows.slice(0, 6);
+
+      const stage2Res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: commonHeaders,
+        body: JSON.stringify({
+          action: 'score_batch',
+          batch: topBatch,
+          campaign: {
+            minClipSec,
+            maxClipSec,
+            focus: options.focus
+          }
+        })
       });
 
-      // Select top candidate windows to evaluate (up to clipCount * 1.5, capped at 15)
-      const targetEvalCount = Math.min(candidateWindows.length, Math.max(8, clipCount + 4));
-      const windowsToScore = candidateWindows.slice(0, targetEvalCount);
-
-      // Score in small batches of 5 to stay strictly under token & timeout limits
-      const scoredWindows = [];
-      const batchSize = 5;
-
-      for (let i = 0; i < windowsToScore.length; i += batchSize) {
-        const batch = windowsToScore.slice(i, i + batchSize);
-        const batchNum = Math.floor(i / batchSize) + 1;
-        const totalBatches = Math.ceil(windowsToScore.length / batchSize);
-
-        setProgress({
-          message: `Step 2/3: AI evaluating candidate batch ${batchNum} of ${totalBatches}...`,
-          percent: 55 + Math.round((i / windowsToScore.length) * 25)
-        });
-
-        const resBatch = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: commonHeaders,
-          body: JSON.stringify({
-            action: 'score_batch',
-            batch,
-            campaign: activeCampaign
-          })
-        });
-
-        const dataBatch = await resBatch.json();
-        if (resBatch.ok && Array.isArray(dataBatch.scoredWindows)) {
-          scoredWindows.push(...dataBatch.scoredWindows);
-        }
+      const stage2Data = await stage2Res.json();
+      if (!stage2Res.ok || !stage2Data.success) {
+        throw new Error(stage2Data.error || 'AI scoring failed. Please retry.');
       }
 
+      const scoredWindows = stage2Data.scoredWindows || [];
       if (scoredWindows.length === 0) {
-        throw new Error('AI evaluation returned no valid scored candidate clips.');
+        throw new Error('No candidate moments passed anti-hallucination verification.');
       }
 
-      // Sort scored windows descending by composite score
-      scoredWindows.sort((a, b) => b.viralityScore - a.viralityScore);
-      const topSelected = scoredWindows.slice(0, clipCount);
+      // Sort candidate windows descending by virality score
+      scoredWindows.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
 
-      // ---------------------------------------------------------
-      // STAGE 3: Sentence boundary snapping & campaign package
-      // ---------------------------------------------------------
-      setProgress({
-        message: 'Step 3/3: Snapping sentence boundaries and verifying campaign compliance...',
-        percent: 90
-      });
+      // Limit to user's desired clipCount (default 5)
+      const topSelected = scoredWindows.slice(0, Math.min(options.clipCount, scoredWindows.length));
 
-      const resPackage = await fetch('/api/analyze', {
+      // -------------------------------------------------------------
+      // STAGE 3: Sentence Snapping & YouTube Shorts Packaging
+      // -------------------------------------------------------------
+      setProgress({ message: 'Locking sentence boundaries and generating YouTube Studio packages...', percent: 75 });
+
+      const stage3Res = await fetch('/api/analyze', {
         method: 'POST',
         headers: commonHeaders,
         body: JSON.stringify({
           action: 'package_clips',
+          video,
           topCandidates: topSelected,
           transcriptSegments,
-          campaign: activeCampaign,
-          video: data1.video
+          campaign: {
+            minClipSec,
+            maxClipSec,
+            focus: options.focus
+          }
         })
       });
 
-      const dataPackage = await resPackage.json();
-      if (!resPackage.ok || !Array.isArray(dataPackage.clips) || dataPackage.clips.length === 0) {
-        throw new Error(dataPackage.error || 'Failed generating campaign clip package.');
+      const stage3Data = await stage3Res.json();
+      if (!stage3Res.ok || !stage3Data.success) {
+        throw new Error(stage3Data.error || 'Failed to package YouTube Shorts clips.');
       }
 
-      const generatedClips = dataPackage.clips;
+      const generatedClips = stage3Data.clips || [];
+      if (generatedClips.length === 0) {
+        throw new Error('No clips could be successfully formed.');
+      }
+
+      setProgress({ message: 'Clips ready!', percent: 100 });
       setClips(generatedClips);
       setStatus('success');
-      showToast(`Scouted ${generatedClips.length} authentic clips grounded in transcript!`);
-
-      // Automatically register found clips into the tracker
-      setTrackerClips(prev => {
-        let updated = [...prev];
-        for (const cl of generatedClips) {
-          const exists = updated.some(t => t.id === cl.id && t.campaignId === activeCampaign.id);
-          if (!exists) {
-            updated = [cl, ...updated];
-          }
-        }
-        saveTrackerClips(updated);
-        return updated;
-      });
+      showToast(`✨ Generated ${generatedClips.length} ready-to-upload YouTube Shorts!`);
 
     } catch (err) {
       console.error('Pipeline error:', err);
-      setError(err.message || 'Something went wrong during analysis.');
+      setError(err.message || 'An unexpected error occurred.');
       setStatus('error');
     }
-  };
-
-  // Update a clip from ClipCard or Tracker
-  const handleUpdateClip = (updatedClip) => {
-    // Update local state
-    setClips(prev => prev.map(c => c.id === updatedClip.id ? updatedClip : c));
-    // Persist to tracker storage
-    const updatedTracker = upsertTrackerClip(updatedClip, activeCampaign);
-    setTrackerClips(updatedTracker);
-    showToast(`Updated "${updatedClip.title.slice(0, 30)}..."`);
-  };
-
-  // Delete clip from tracker
-  const handleDeleteTrackerClip = (clipId) => {
-    const updated = trackerClips.filter(c => c.id !== clipId);
-    setTrackerClips(updated);
-    saveTrackerClips(updated);
-    showToast('Removed clip from tracker');
   };
 
   const handleReset = () => {
@@ -288,228 +212,220 @@ export default function App() {
     setVideoData(null);
     setClips([]);
     setError(null);
-    setCaptionError(null);
-    setActiveTab('source');
+    try {
+      localStorage.removeItem('clipscout_current_session_v3');
+    } catch {}
   };
 
-  const handleScrollToClip = (clipId) => {
-    const el = document.getElementById(clipId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el.classList.add('ring-2', 'ring-amber-500');
-      setTimeout(() => el.classList.remove('ring-2', 'ring-amber-500'), 2000);
-    }
+  const handleDownloadErrorFallback = (data, clip) => {
+    setDownloadModal({
+      isOpen: true,
+      clip,
+      videoId: videoData?.videoId
+    });
   };
 
-  // Sort candidate clips
+  // Copy entire batch of all clips
+  const handleCopyAllBatch = () => {
+    if (clips.length === 0) return;
+    const batchText = clips.map((c, i) => {
+      const tags = (c.trendingHashtags || c.hashtags || []).join(' ');
+      return `=== CLIP #${i + 1}: ${c.title} (${c.startTime} - ${c.endTime}) ===\n\nTitle: ${c.title}\n\nDescription:\n${c.description}\n\nHashtags:\n${tags}\n\nYouTube Timestamp Link: https://youtu.be/${videoData?.videoId}?t=${Math.floor(c.startSeconds || 0)}\n\n`;
+    }).join('\n----------------------------------------\n\n');
+
+    navigator.clipboard.writeText(batchText);
+    setCopiedAllBatch(true);
+    showToast('Copied all clips data to clipboard!');
+    setTimeout(() => setCopiedAllBatch(false), 2500);
+  };
+
+  // Sorted clips
   const sortedClips = useMemo(() => {
-    if (!clips) return [];
     const list = [...clips];
-    switch (sortOption) {
-      case 'chronological':
-        return list.sort((a, b) => a.startSeconds - b.startSeconds);
-      case 'shortest':
-        return list.sort((a, b) => a.durationSeconds - b.durationSeconds);
-      case 'longest':
-        return list.sort((a, b) => b.durationSeconds - a.durationSeconds);
-      case 'virality':
-      default:
-        return list.sort((a, b) => b.viralityScore - a.viralityScore);
+    if (sortOption === 'virality') {
+      return list.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
     }
+    if (sortOption === 'chronological') {
+      return list.sort((a, b) => (a.startSeconds || 0) - (b.startSeconds || 0));
+    }
+    if (sortOption === 'duration') {
+      return list.sort((a, b) => (a.durationSeconds || 0) - (b.durationSeconds || 0));
+    }
+    return list;
   }, [clips, sortOption]);
 
-  // Export Cut List / Timestamps to Clipboard
-  const handleCopyCutList = () => {
-    if (!clips.length) return;
-    const lines = clips.map((c, i) =>
-      `${i + 1}. [${c.startTime} - ${c.endTime}] (${c.durationSeconds}s) | Score: ${c.viralityScore}/100\n   Title: ${c.title}\n   Hook: "${c.hookText || c.title}"`
-    );
-    const text = `CLIP CUT LIST (${videoData?.title || 'Video'})\nCampaign: ${activeCampaign.name}\n\n${lines.join('\n\n')}`;
-    navigator.clipboard.writeText(text);
-    showToast('Copied editor cut list to clipboard!');
-  };
-
   return (
-    <div className="min-h-screen bg-studio-950 text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#07080a] text-zinc-100 flex flex-col font-sans selection:bg-violet-500/30 selection:text-white">
       
-      {/* Toast Alert */}
-      <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
+      {/* Top Header */}
+      <Header
+        clipsCount={clips.length}
+        onReset={handleReset}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
-      {/* Settings & Backups Modal */}
+      {/* Main Content Area */}
+      <main className="flex-1 w-full pb-16">
+        
+        {/* ============================================================== */}
+        {/* IDLE STATE: Hero Input Section                                 */}
+        {/* ============================================================== */}
+        {status === 'idle' && (
+          <HeroInput
+            onAnalyze={handleAnalyze}
+            isLoading={false}
+            options={options}
+            setOptions={setOptions}
+          />
+        )}
+
+        {/* ============================================================== */}
+        {/* LOADING STATE: Real-time Multi-stage Progress Visualizer       */}
+        {/* ============================================================== */}
+        {status === 'loading' && (
+          <ProcessingState
+            progress={progress}
+            videoData={videoData}
+            onCancel={handleReset}
+          />
+        )}
+
+        {/* ============================================================== */}
+        {/* ERROR STATE: Clean error card with retry/paste options         */}
+        {/* ============================================================== */}
+        {status === 'error' && (
+          <div className="w-full max-w-xl mx-auto py-16 px-4 animate-fade-in text-center">
+            <div className="rounded-2xl bg-studio-900 border border-studio-700/80 p-8 shadow-2xl space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white">Analysis Could Not Complete</h3>
+              <p className="text-sm text-zinc-400 leading-relaxed">
+                {error || 'An unexpected issue occurred while extracting clips from the source.'}
+              </p>
+              <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                <button
+                  onClick={handleReset}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition"
+                >
+                  Try Another Video
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* SUCCESS STATE: Results Feed & YouTube Studio Ready Package     */}
+        {/* ============================================================== */}
+        {status === 'success' && (
+          <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 animate-fade-in">
+            
+            {/* Video Overview Banner */}
+            <VideoBanner
+              video={videoData}
+              clipsCount={clips.length}
+              onReset={handleReset}
+            />
+
+            {/* Results Toolbar */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-studio-800">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
+                  <span>Viral YouTube Shorts</span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold">
+                    {clips.length} Ready
+                  </span>
+                </h2>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Download the MP4 or copy the package directly into YouTube Studio.
+                </p>
+              </div>
+
+              {/* Sort Controls & Batch Copy */}
+              <div className="flex items-center gap-2.5 flex-wrap w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-1 bg-studio-900 border border-studio-800 rounded-xl p-1 text-xs">
+                  <span className="text-zinc-500 px-2 font-medium">Sort:</span>
+                  {[
+                    { id: 'virality', label: '🔥 Virality' },
+                    { id: 'chronological', label: '⏱️ Timeline' },
+                    { id: 'duration', label: '⏳ Length' }
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setSortOption(s.id)}
+                      className={`px-2.5 py-1 rounded-lg transition font-medium ${
+                        sortOption === s.id
+                          ? 'bg-studio-800 text-white font-semibold shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCopyAllBatch}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700/80 text-zinc-200 hover:text-white text-xs font-semibold transition"
+                  title="Copy titles, descriptions & tags for all clips"
+                >
+                  {copiedAllBatch ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-emerald-300">Copied All</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                      <span>Copy All Data</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Clips Grid */}
+            <div className="space-y-6">
+              {sortedClips.map((clip) => (
+                <ClipCard
+                  key={clip.id}
+                  clip={clip}
+                  videoData={videoData}
+                  onShowToast={showToast}
+                  onDownloadError={handleDownloadErrorFallback}
+                />
+              ))}
+            </div>
+
+          </div>
+        )}
+
+      </main>
+
+      {/* Fallback Download Modal (when running in cloud serverless) */}
+      <DownloadModal
+        isOpen={downloadModal.isOpen}
+        clip={downloadModal.clip || {}}
+        videoId={downloadModal.videoId}
+        onClose={() => setDownloadModal({ isOpen: false, clip: null, videoId: null })}
+        onNotify={showToast}
+      />
+
+      {/* Settings Modal */}
       <SettingsModal
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onNotify={showToast}
       />
 
-      {/* Main Header & 3-Step Navigation */}
-      <Header
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        clipsCount={clips.length}
-        onOpenSettings={() => setSettingsOpen(true)}
+      {/* Toast Notification */}
+      <Toast
+        message={toastMessage}
+        onClose={() => setToastMessage(null)}
       />
-
-      <main className="flex-1 pb-16">
-        
-        {/* STEP 1: CAMPAIGN BRIEF */}
-        {activeTab === 'campaign' && (
-          <CampaignBrief
-            campaigns={campaigns}
-            activeCampaign={activeCampaign}
-            onSelectCampaign={handleSelectCampaign}
-            onSaveCampaign={handleSaveCampaign}
-            onCreateCampaign={handleCreateCampaign}
-            onDeleteCampaign={handleDeleteCampaign}
-            onProceedToSource={() => setActiveTab('source')}
-          />
-        )}
-
-        {/* STEP 2: SOURCE INPUT */}
-        {activeTab === 'source' && (
-          <SourceStep
-            onSubmitSource={executePipeline}
-            isLoading={status === 'loading'}
-            campaign={activeCampaign}
-            captionError={captionError}
-            onClearCaptionError={() => setCaptionError(null)}
-            clipCount={clipCount}
-            onChangeClipCount={setClipCount}
-          />
-        )}
-
-        {/* STEP 3: CLIPS RESULTS */}
-        {activeTab === 'clips' && (
-          <div>
-            {status === 'loading' && (
-              <LoadingState
-                progressMessage={progress.message}
-                progressPercent={progress.percent}
-              />
-            )}
-
-            {status === 'error' && (
-              <ErrorState
-                error={error}
-                onRetry={lastSourcePayload ? () => executePipeline(lastSourcePayload) : null}
-                onSwitchToPaste={() => {
-                  setActiveTab('source');
-                  setStatus('idle');
-                }}
-              />
-            )}
-
-            {status === 'idle' && clips.length === 0 && (
-              <EmptyClipsState
-                campaignName={activeCampaign.name}
-                onGoToSource={() => setActiveTab('source')}
-              />
-            )}
-
-            {(status === 'success' || (status === 'idle' && clips.length > 0)) && videoData && (
-              <div className="space-y-6">
-                
-                {/* Source Banner */}
-                <VideoBanner
-                  video={videoData}
-                  clipsCount={clips.length}
-                  onReset={handleReset}
-                />
-
-                {/* Timeline Visual Distribution */}
-                <TimelineBar
-                  clips={clips}
-                  durationSeconds={videoData.durationSeconds || 7200}
-                  onSelectClip={handleScrollToClip}
-                />
-
-                {/* Controls Bar: Sort, Cut List, Switch Campaign */}
-                <section className="w-full max-w-4xl mx-auto px-4">
-                  <div className="flex items-center justify-between gap-3 p-3 rounded-2xl bg-studio-900 border border-studio-800 flex-wrap text-xs">
-                    
-                    {/* Active Campaign Tag */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500 font-medium">Campaign:</span>
-                      <span className="font-bold text-amber-400">{activeCampaign.name}</span>
-                      <span className="text-zinc-600">•</span>
-                      <span className="text-zinc-400">{sortedClips.length} clips scouted</span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {/* Sort Dropdown */}
-                      <div className="flex items-center gap-1.5 bg-studio-950 border border-studio-750 px-2.5 py-1 rounded-xl text-zinc-300">
-                        <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
-                        <select
-                          value={sortOption}
-                          onChange={(e) => setSortOption(e.target.value)}
-                          className="bg-transparent text-zinc-200 font-medium focus:outline-none cursor-pointer"
-                        >
-                          <option value="virality" className="bg-studio-900">Highest AI Score</option>
-                          <option value="chronological" className="bg-studio-900">Chronological</option>
-                          <option value="shortest" className="bg-studio-900">Shortest (15-30s)</option>
-                          <option value="longest" className="bg-studio-900">Longest (35-58s)</option>
-                        </select>
-                      </div>
-
-                      {/* Copy Cut List */}
-                      <button
-                        type="button"
-                        onClick={handleCopyCutList}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-studio-950 hover:bg-studio-800 border border-studio-750 text-zinc-200 font-medium transition"
-                        title="Copy editor cut list with timestamps"
-                      >
-                        <Scissors className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Cut List</span>
-                      </button>
-                    </div>
-
-                  </div>
-
-                  {/* Vertical List of Ranked Clip Cards */}
-                  <div className="mt-4 space-y-4">
-                    {sortedClips.map((clip, index) => (
-                      <ClipCard
-                        key={clip.id || index}
-                        clip={clip}
-                        rank={index + 1}
-                        videoId={videoData.videoId}
-                        campaign={activeCampaign}
-                        onNotify={showToast}
-                        onUpdateClip={handleUpdateClip}
-                      />
-                    ))}
-                  </div>
-                </section>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 4: CAMPAIGN WORKFLOW & EARNINGS TRACKER */}
-        {activeTab === 'tracker' && (
-          <TrackerTab
-            campaigns={campaigns}
-            activeCampaign={activeCampaign}
-            onSelectCampaign={handleSelectCampaign}
-            trackerClips={trackerClips}
-            onUpdateClip={handleUpdateClip}
-            onDeleteClip={handleDeleteTrackerClip}
-            onNotify={showToast}
-          />
-        )}
-
-      </main>
-
-      {/* Footer */}
-      <footer className="w-full border-t border-studio-850 py-6 text-center text-xs text-zinc-500">
-        <p className="flex items-center justify-center gap-2">
-          <span>ClipScout</span>
-          <span>•</span>
-          <span>Content Rewards Clipping Assistant</span>
-          <span>•</span>
-          <span>Zero Hallucinations</span>
-        </p>
-      </footer>
 
     </div>
   );

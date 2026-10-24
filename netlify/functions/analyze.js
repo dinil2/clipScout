@@ -267,14 +267,14 @@ export const handler = async (event) => {
           };
         }
 
-        // 4. Ensure required hashtags & mentions are included in hashtags array
-        const finalTags = Array.isArray(pkg.hashtags) ? [...pkg.hashtags] : [];
-        if (Array.isArray(campaign.requiredHashtags)) {
-          for (const reqTag of campaign.requiredHashtags) {
-            if (!finalTags.some(t => t.toLowerCase().replace('#', '') === reqTag.toLowerCase().replace('#', ''))) {
-              finalTags.unshift(reqTag);
-            }
-          }
+        // 4. Trending hashtags
+        const rawTags = pkg.trendingHashtags || pkg.hashtags || [];
+        const finalTags = Array.isArray(rawTags) ? [...rawTags] : [];
+        if (!finalTags.some(t => t.toLowerCase() === '#shorts')) {
+          finalTags.unshift('#shorts');
+        }
+        if (!finalTags.some(t => t.toLowerCase() === '#podcast')) {
+          finalTags.splice(1, 0, '#podcast');
         }
 
         // 5. Generate authentic .SRT subtitles strictly from real transcript lines
@@ -297,6 +297,7 @@ export const handler = async (event) => {
           durationSeconds: snapped.durationSec,
           title: pkg.title || 'Untitled Clip',
           description: pkg.description || '',
+          trendingHashtags: finalTags,
           hashtags: finalTags,
           hookText: pkg.hookText || '',
           pinnedComment: pkg.pinnedComment || '',

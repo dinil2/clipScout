@@ -11,7 +11,8 @@ export const windowEvaluationSchema = z.object({
   hook: z.coerce.number().min(0).max(25),
   standaloneClarity: z.coerce.number().min(0).max(25),
   emotionPayoff: z.coerce.number().min(0).max(25),
-  campaignFit: z.coerce.number().min(0).max(25),
+  retentionLoop: z.coerce.number().min(0).max(25).optional(),
+  campaignFit: z.coerce.number().min(0).max(25).optional(),
   reasoning: z.string().min(1),
   evidenceQuote: z.string().min(2),
   suggestedStartSec: z.coerce.number().optional(),
@@ -26,7 +27,8 @@ export const clipPackageSchema = z.object({
   hookText: z.string().min(2),
   title: z.string().min(3),
   description: z.string().min(5),
-  hashtags: z.array(z.string()).default([]),
+  trendingHashtags: z.array(z.string()).optional(),
+  hashtags: z.array(z.string()).optional(),
   pinnedComment: z.string().min(2),
   editingTip: z.string().min(2),
   evidenceQuote: z.string().min(2)
@@ -80,6 +82,6 @@ export function verifyEvidenceQuote(evidenceQuote, transcriptText) {
   }
 
   const matchRatio = matchedTokens / quoteTokens.length;
-  // Require at least 75% token presence
-  return matchRatio >= 0.75;
+  // Require at least 70% token presence
+  return matchRatio >= 0.70;
 }

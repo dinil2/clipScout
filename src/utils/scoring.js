@@ -32,16 +32,17 @@ export function calculateTotalScore(subScores = {}) {
   const hook = clampSub(subScores.hook);
   const standaloneClarity = clampSub(subScores.standaloneClarity);
   const emotionPayoff = clampSub(subScores.emotionPayoff);
-  const campaignFit = clampSub(subScores.campaignFit);
+  const retentionLoop = clampSub(subScores.retentionLoop ?? subScores.campaignFit);
 
-  const total = hook + standaloneClarity + emotionPayoff + campaignFit;
+  const total = hook + standaloneClarity + emotionPayoff + retentionLoop;
 
   return {
     total: Math.max(0, Math.min(100, total)),
     hook,
     standaloneClarity,
     emotionPayoff,
-    campaignFit
+    retentionLoop,
+    campaignFit: retentionLoop
   };
 }
 
