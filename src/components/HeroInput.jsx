@@ -267,6 +267,25 @@ export default function HeroInput({
               </div>
             )}
 
+            {/* Helpful Cloud / YouTube Captions Hint */}
+            <div className="flex items-center justify-between text-xs text-zinc-500 px-1 pt-0.5">
+              <span className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                <span>Automatically pulls speech captions from YouTube</span>
+              </span>
+              <span className="hidden sm:inline-block text-zinc-500">
+                Have video or audio file? Use{' '}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('laptop')}
+                  className="text-violet-400 hover:text-violet-300 underline font-medium"
+                >
+                  Upload
+                </button>{' '}
+                for instant Groq Whisper AI
+              </span>
+            </div>
+
             {/* Quick Samples Section */}
             <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
               <span className="font-medium text-zinc-500">Try a sample podcast:</span>

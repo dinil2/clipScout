@@ -21,12 +21,25 @@ export async function transcribeAudioWithWhisper(audioBufferOrPath, filename = '
   const formData = new FormData();
   let fileBlob;
 
+  const ext = (filename || 'audio.mp3').split('.').pop().toLowerCase();
+  const mimeMap = {
+    mp3: 'audio/mpeg',
+    mp4: 'video/mp4',
+    m4a: 'audio/mp4',
+    wav: 'audio/wav',
+    webm: 'audio/webm',
+    mpeg: 'audio/mpeg',
+    ogg: 'audio/ogg',
+    flac: 'audio/flac'
+  };
+  const mimeType = mimeMap[ext] || 'audio/mpeg';
+
   if (typeof audioBufferOrPath === 'string') {
     const fs = await import('fs');
     const buf = fs.readFileSync(audioBufferOrPath);
-    fileBlob = new Blob([buf], { type: 'audio/mp3' });
+    fileBlob = new Blob([buf], { type: mimeType });
   } else {
-    fileBlob = new Blob([audioBufferOrPath], { type: 'audio/mp3' });
+    fileBlob = new Blob([audioBufferOrPath], { type: mimeType });
   }
 
   formData.append('file', fileBlob, filename);
