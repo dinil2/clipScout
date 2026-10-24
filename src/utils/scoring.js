@@ -159,12 +159,29 @@ export function scoreWindowHeuristic(windowText, durationSec, campaign = {}) {
   const exclamationMatches = (windowText.match(/!/g) || []).length;
   score += Math.min(10, exclamationMatches * 3);
 
-  // 4. Emotional & reaction cues
+  // 4. Strong Viral Hook & Storytelling Openers (Huge bonus for meaningful beats)
+  const viralHookPatterns = /\b(the truth is|the secret to|the biggest mistake|nobody talks about|what people don't realize|the moment that changed|here is why|i will never forget|the real reason|the brutal reality|stop doing|if you want to|the 1 thing|this is how|the rule is|i realized that|my whole life changed|the darkest moment|the greatest lesson)\b/gi;
+  const hookPatternHits = (windowText.match(viralHookPatterns) || []).length;
+  score += hookPatternHits * 15;
+
+  // 5. Meaningful Insight & Philosophy Keywords
+  const meaningfulConceptTokens = /\b(discipline|success|mindset|focus|habit|money|wealth|failure|psychology|relationship|dopamine|regret|decision|sacrifice|courage|truth|lesson|power|ambition|fear|death|time|future|brain|life)\b/gi;
+  const conceptHits = (windowText.match(meaningfulConceptTokens) || []).length;
+  score += Math.min(30, conceptHits * 4);
+
+  // 6. Emotional & reaction cues
   const emotionalTokens = /\b(why|how|secret|truth|never|always|insane|crazy|mistake|shocking|unbelievable|huge|warning|stop|wait|watch|lesson|remember|advice|listen)\b/gi;
   const tokenMatches = (windowText.match(emotionalTokens) || []).length;
-  score += Math.min(25, tokenMatches * 4);
+  score += Math.min(20, tokenMatches * 3);
 
-  // 5. Campaign topic keywords match
+  // 7. PENALTY: Heavily downgrade conversational filler, housekeeping, and sponsor reads
+  const junkTokens = /\b(welcome back|sponsor|brought to you by|our sponsor|check the link|promo code|discount code|subscribe to the channel|hit the bell|leave a review|can you hear me|mic check|give me a second|pull up my notes|thanks for having me on|see you next time|take a quick break|cut to commercial)\b/gi;
+  const junkHits = (windowText.match(junkTokens) || []).length;
+  if (junkHits > 0) {
+    score -= junkHits * 35;
+  }
+
+  // 8. Campaign / user topic keywords match
   if (campaign) {
     const campaignTokens = [];
     if (campaign.name) campaignTokens.push(...campaign.name.toLowerCase().split(/\s+/));
@@ -185,5 +202,5 @@ export function scoreWindowHeuristic(windowText, durationSec, campaign = {}) {
     score += Math.min(25, keywordHits * 5);
   }
 
-  return score;
+  return Math.max(0, score);
 }

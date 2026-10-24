@@ -28,7 +28,7 @@ export default function App() {
   // User Preferences
   const [options, setOptions] = useState({
     duration: '30-60', // '15-30' | '30-60' | '60-90'
-    clipCount: 5,      // 3 | 5 | 8
+    clipCount: 10,     // 5 | 10 | 15 | 20
     focus: 'viral_hooks' // 'viral_hooks' | 'mindset' | 'funny' | 'debate'
   });
 
@@ -84,12 +84,33 @@ export default function App() {
     };
 
     try {
+      let activePayload = { ...sourcePayload };
+
+      // Case: Google Drive Link -> Transcribe with Groq Whisper first
+      if (sourcePayload.isGoogleDrive && sourcePayload.googleDriveUrl) {
+        setProgress({ message: 'Connecting to Google Drive & transcribing speech with Whisper...', percent: 20 });
+        const transcribeRes = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: sourcePayload.googleDriveUrl, title: sourcePayload.title })
+        });
+        const transcribeData = await transcribeRes.json();
+        if (!transcribeRes.ok || !transcribeData.success) {
+          throw new Error(transcribeData.error || 'Failed to transcribe Google Drive audio. Ensure link is public.');
+        }
+
+        activePayload = {
+          videoId: transcribeData.video.videoId,
+          video: transcribeData.video,
+          transcriptSegments: transcribeData.transcriptSegments
+        };
+      }
+
       // -------------------------------------------------------------
       // STAGE 1: Fetch Video Metadata & Real Speech Segments
       // -------------------------------------------------------------
-      setProgress({ message: 'Fetching video metadata and speech transcript...', percent: 20 });
+      setProgress({ message: 'Fetching video metadata and speech transcript...', percent: 25 });
 
-      // Determine duration constraints from options
       let minClipSec = 30;
       let maxClipSec = 58;
       if (options.duration === '15-30') {
@@ -105,7 +126,7 @@ export default function App() {
         headers: commonHeaders,
         body: JSON.stringify({
           action: 'fetch_source',
-          ...sourcePayload,
+          ...activePayload,
           campaign: {
             minClipSec,
             maxClipSec,
@@ -129,31 +150,45 @@ export default function App() {
       // -------------------------------------------------------------
       // STAGE 2: Score Candidate Windows with LLM
       // -------------------------------------------------------------
-      setProgress({ message: 'AI analyzing full conversation for high-retention hooks...', percent: 45 });
+      // Support requested clip count (5, 10, 15, 20) by scaling candidate batch size
+      const requestedClips = options.clipCount || 10;
+      const candidateBatchSize = Math.min(candidateWindows.length, Math.max(12, Math.round(requestedClips * 1.5)));
+      const topBatch = candidateWindows.slice(0, candidateBatchSize);
 
-      // Take top candidate batch (limit to 6 for speed and quota efficiency)
-      const topBatch = candidateWindows.slice(0, 6);
-
-      const stage2Res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: commonHeaders,
-        body: JSON.stringify({
-          action: 'score_batch',
-          batch: topBatch,
-          campaign: {
-            minClipSec,
-            maxClipSec,
-            focus: options.focus
-          }
-        })
-      });
-
-      const stage2Data = await stage2Res.json();
-      if (!stage2Res.ok || !stage2Data.success) {
-        throw new Error(stage2Data.error || 'AI scoring failed. Please retry.');
+      // Split into batches of 8 candidate windows
+      const chunks = [];
+      for (let i = 0; i < topBatch.length; i += 8) {
+        chunks.push(topBatch.slice(i, i + 8));
       }
 
-      const scoredWindows = stage2Data.scoredWindows || [];
+      let scoredWindows = [];
+      for (let idx = 0; idx < chunks.length; idx++) {
+        const chunk = chunks[idx];
+        setProgress({ 
+          message: `AI analyzing conversation for viral hooks (${idx * 8 + 1}–${Math.min((idx + 1) * 8, topBatch.length)} of ${topBatch.length})...`, 
+          percent: 35 + Math.round(((idx + 1) / chunks.length) * 30) 
+        });
+
+        const stage2Res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: commonHeaders,
+          body: JSON.stringify({
+            action: 'score_batch',
+            batch: chunk,
+            campaign: {
+              minClipSec,
+              maxClipSec,
+              focus: options.focus
+            }
+          })
+        });
+
+        const stage2Data = await stage2Res.json();
+        if (stage2Data.scoredWindows) {
+          scoredWindows.push(...stage2Data.scoredWindows);
+        }
+      }
+
       if (scoredWindows.length === 0) {
         throw new Error('No candidate moments passed anti-hallucination verification.');
       }
@@ -161,13 +196,13 @@ export default function App() {
       // Sort candidate windows descending by virality score
       scoredWindows.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
 
-      // Limit to user's desired clipCount (default 5)
-      const topSelected = scoredWindows.slice(0, Math.min(options.clipCount, scoredWindows.length));
+      // Limit to user's desired clipCount (5, 10, 15, 20)
+      const topSelected = scoredWindows.slice(0, Math.min(requestedClips, scoredWindows.length));
 
       // -------------------------------------------------------------
       // STAGE 3: Sentence Snapping & YouTube Shorts Packaging
       // -------------------------------------------------------------
-      setProgress({ message: 'Locking sentence boundaries and generating YouTube Studio packages...', percent: 75 });
+      setProgress({ message: `Locking sentence boundaries and packaging ${topSelected.length} YouTube Shorts...`, percent: 75 });
 
       const stage3Res = await fetch('/api/analyze', {
         method: 'POST',
@@ -207,6 +242,50 @@ export default function App() {
     }
   };
 
+  // Handle uploading video file from laptop
+  const handleUploadFile = async (file) => {
+    setStatus('loading');
+    setError(null);
+    setProgress({ message: `Uploading ${file.name} and extracting audio...`, percent: 15 });
+
+    try {
+      const localBlobUrl = URL.createObjectURL(file);
+
+      // Transcribe via /api/transcribe
+      setProgress({ message: `AI transcribing speech with Groq Whisper...`, percent: 35 });
+
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: {
+          'x-filename': encodeURIComponent(file.name)
+        },
+        body: file
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to transcribe local video file.');
+      }
+
+      const uploadedVideoMeta = {
+        ...data.video,
+        localBlobUrl
+      };
+
+      // Feed into main analysis pipeline
+      await handleAnalyze({
+        videoId: uploadedVideoMeta.videoId,
+        video: uploadedVideoMeta,
+        transcriptSegments: data.transcriptSegments
+      });
+
+    } catch (err) {
+      console.error('Laptop upload error:', err);
+      setError(err.message || 'Failed to process laptop video file.');
+      setStatus('error');
+    }
+  };
+
   const handleReset = () => {
     setStatus('idle');
     setVideoData(null);
@@ -230,7 +309,7 @@ export default function App() {
     if (clips.length === 0) return;
     const batchText = clips.map((c, i) => {
       const tags = (c.trendingHashtags || c.hashtags || []).join(' ');
-      return `=== CLIP #${i + 1}: ${c.title} (${c.startTime} - ${c.endTime}) ===\n\nTitle: ${c.title}\n\nDescription:\n${c.description}\n\nHashtags:\n${tags}\n\nYouTube Timestamp Link: https://youtu.be/${videoData?.videoId}?t=${Math.floor(c.startSeconds || 0)}\n\n`;
+      return `=== CLIP #${i + 1}: ${c.title} (${c.startTime} - ${c.endTime}) ===\n\nTitle: ${c.title}\n\nDescription:\n${c.description}\n\nHashtags:\n${tags}\n\n`;
     }).join('\n----------------------------------------\n\n');
 
     navigator.clipboard.writeText(batchText);
@@ -273,6 +352,7 @@ export default function App() {
         {status === 'idle' && (
           <HeroInput
             onAnalyze={handleAnalyze}
+            onUploadFile={handleUploadFile}
             isLoading={false}
             options={options}
             setOptions={setOptions}

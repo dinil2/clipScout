@@ -10,7 +10,7 @@ You are a senior full-stack engineer and product designer maintaining a high-pre
 Enable creators to paste a video link (or upload transcript/video), analyze the speech for high-hook viral moments, download trimmed MP4 video clips directly, and copy optimized titles, trending hashtags, descriptions, and subtitles in one click to upload straight into YouTube Studio.
 
 # **Core Creator Workflow:**
-1. **Input**: Paste a YouTube podcast/video link, or select a sample podcast (Huberman, Steve Jobs, Lex Fridman, Joe Rogan), or upload/paste custom transcripts.
+1. **Input**: Paste a YouTube or Google Drive video link, upload a video file directly from your laptop (`.mp4`, `.mov`, `.webm`), select a curated sample podcast, or paste custom transcripts. Automatic speech-to-text with Groq Whisper (`whisper-large-v3-turbo`).
 2. **AI Analysis**: 
    - Scans full timeline using non-hallucinatory sliding windows.
    - Evaluates Hook Strength (0-25), Standalone Clarity (0-25), Emotion Payoff (0-25), and Retention Loop (0-25).

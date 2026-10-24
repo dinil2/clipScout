@@ -40,7 +40,8 @@ export default function ClipCard({
 
     try {
       const safeTitle = (clip.title || 'clip').replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 45);
-      const url = `/api/download?videoId=${videoId}&start=${startSec}&end=${endSec}&title=${encodeURIComponent(safeTitle)}`;
+      const identifier = videoData?.localFilePath || videoData?.googleDriveUrl || videoId;
+      const url = `/api/download?videoId=${encodeURIComponent(identifier)}&start=${startSec}&end=${endSec}&title=${encodeURIComponent(safeTitle)}`;
 
       const res = await fetch(url);
       const contentType = res.headers.get('content-type') || '';
@@ -120,9 +121,23 @@ export default function ClipCard({
               </div>
             </div>
 
-            {/* Embedded YouTube Clip Preview Player */}
+            {/* Embedded Player: Laptop Video, Google Drive, or YouTube */}
             <div className="relative aspect-[9/16] max-h-[360px] w-full rounded-xl overflow-hidden bg-black border border-studio-700/80 shadow-inner mx-auto mb-4">
-              {videoId ? (
+              {videoData?.localBlobUrl ? (
+                <video
+                  src={`${videoData.localBlobUrl}#t=${startSec},${endSec}`}
+                  controls
+                  playsInline
+                  className="w-full h-full object-contain bg-black"
+                />
+              ) : videoData?.isGoogleDrive ? (
+                <iframe
+                  src={videoData.googleDriveUrl?.includes('/preview') ? videoData.googleDriveUrl : `https://drive.google.com/file/d/${videoId}/preview`}
+                  title={clip.title}
+                  className="w-full h-full object-cover"
+                  allow="autoplay"
+                />
+              ) : videoId && videoId.length === 11 ? (
                 <iframe
                   src={`https://www.youtube-nocookie.com/embed/${videoId}?start=${startSec}&end=${endSec}&autoplay=0&rel=0&modestbranding=1`}
                   title={clip.title}
@@ -131,8 +146,8 @@ export default function ClipCard({
                   allowFullScreen
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-zinc-600 text-xs">
-                  No preview available
+                <div className="w-full h-full flex items-center justify-center text-zinc-500 text-xs p-4 text-center">
+                  Video Preview ({clip.startTime} – {clip.endTime})
                 </div>
               )}
             </div>

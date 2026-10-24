@@ -13,10 +13,35 @@ import json
 import yt_dlp
 
 def download_clip(video_id, start_sec, end_sec, output_path):
-    video_url = f"https://www.youtube.com/watch?v={video_id}"
     dur = max(5, int(end_sec) - int(start_sec))
 
-    # 1. Extract video metadata to validate duration and bounds
+    # 1. Local video file on disk (laptop upload)
+    if os.path.exists(video_id):
+        try:
+            import subprocess
+            # Fast stream copy slice
+            cmd = ['ffmpeg', '-y', '-ss', str(start_sec), '-i', video_id, '-t', str(dur), '-c', 'copy', output_path]
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if p.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                print(json.dumps({"success": True, "filePath": output_path, "size": os.path.getsize(output_path)}))
+                return 0
+
+            # Re-encode fallback if stream copy failed
+            cmd_reencode = ['ffmpeg', '-y', '-ss', str(start_sec), '-i', video_id, '-t', str(dur), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-c:a', 'aac', output_path]
+            p2 = subprocess.run(cmd_reencode, capture_output=True, text=True, timeout=60)
+            if p2.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+                print(json.dumps({"success": True, "filePath": output_path, "size": os.path.getsize(output_path)}))
+                return 0
+        except Exception as local_err:
+            pass
+
+    # 2. Remote URL: Google Drive, YouTube, or direct stream
+    if video_id.startswith('http://') or video_id.startswith('https://'):
+        video_url = video_id
+    else:
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Extract video metadata to validate duration and bounds
     video_dur = 0
     video_url_stream = None
     audio_url_stream = None

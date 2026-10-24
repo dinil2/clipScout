@@ -31,11 +31,14 @@ CLIP FOCUS: ${focus === 'mindset' ? 'Deep mindset shifts, psychology & life wisd
 
 EVALUATION CRITERIA (Provide 4 sub-scores from 0 to 25 each, totaling 0-100):
 1. hook (0-25): Does the opening 3 seconds grab immediate attention (provocative question, bold realization, or pattern interrupt)?
-2. standaloneClarity (0-25): Does this thought make complete, satisfying sense on its own without needing the full 2-hour podcast?
+2. standaloneClarity (0-25): Does this thought make complete, satisfying sense on its own without needing the rest of the 2-hour podcast?
 3. emotionPayoff (0-25): Does it deliver an "aha!" moment, emotional punch, intense value, or shock factor?
 4. retentionLoop (0-25): Will viewers watch all the way to the end and share it on YouTube Shorts / TikTok?
 
-CRITICAL ANTI-HALLUCINATION RULES:
+CRITICAL MEANINGFULNESS & HIGH-RETENTION RULES:
+- REJECT RANDOM / JUNK CHATTER: Give very low scores (under 10) to housekeeping, intros/outros, sponsor reads, technical setup, or rambling banter with no point.
+- COMPLETE "IDEA UNIT" REQUIRED: The clip MUST form a coherent, self-contained thought or story beat. It must have a clear beginning (hook), middle (story/argument), and clean ending (conclusion/punchline).
+- "WOULD SOMEONE SHARE THIS?": Only reward clips with genuine intellectual, emotional, or entertainment substance (e.g. counter-intuitive truths, life-changing habits, shocking realizations, powerful stories).
 - Ground every single score strictly in the actual spoken transcript words provided.
 - Each evaluation MUST include an "evidenceQuote": an exact verbatim quote of 3 to 10 words from that candidate window.
 - "suggestedStartSec" and "suggestedEndSec" MUST fall strictly within that window's startSec and endSec, spanning between ${minSec} and ${maxSec} seconds.

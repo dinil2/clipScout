@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { 
   Sparkles, Youtube, Clipboard, X, SlidersHorizontal, 
-  Clock, Flame, Upload, FileText, ArrowRight, Play, Check 
+  Clock, Flame, Upload, FileText, ArrowRight, Play, Check,
+  HardDrive, Video, Laptop, HelpCircle
 } from 'lucide-react';
 
 // Popular podcast samples for instant 1-click testing
@@ -34,17 +35,22 @@ const SAMPLE_PODCASTS = [
 
 export default function HeroInput({ 
   onAnalyze, 
+  onUploadFile,
   isLoading, 
   options, 
   setOptions 
 }) {
+  const [activeTab, setActiveTab] = useState('link'); // 'link' (YouTube/Drive) | 'laptop' (Local Video) | 'transcript'
   const [url, setUrl] = useState('');
   const [showOptions, setShowOptions] = useState(false);
-  const [showAltInput, setShowAltInput] = useState(false);
-  const [altTab, setAltTab] = useState('paste'); // 'paste' | 'upload'
   const [pastedText, setPastedText] = useState('');
-  const [uploadedFile, setUploadedFile] = useState(null);
+  const [uploadedTranscriptFile, setUploadedTranscriptFile] = useState(null);
+  const [laptopVideoFile, setLaptopVideoFile] = useState(null);
   const [copiedSampleId, setCopiedSampleId] = useState(null);
+
+  // Check link type
+  const isGoogleDriveLink = url.includes('drive.google.com');
+  const isYouTubeLink = url.includes('youtube.com') || url.includes('youtu.be') || /^[a-zA-Z0-9_-]{11}$/.test(url.trim());
 
   const handlePasteClipboard = async () => {
     try {
@@ -55,72 +61,77 @@ export default function HeroInput({
         }
       }
     } catch {
-      // Fallback: focus input
-      const el = document.getElementById('youtube-url-input');
+      const el = document.getElementById('video-url-input');
       if (el) el.focus();
     }
   };
 
   const handleSampleClick = (sample) => {
+    setActiveTab('link');
     setUrl(sample.url);
     setCopiedSampleId(sample.id);
     setTimeout(() => setCopiedSampleId(null), 1500);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmitLink = (e) => {
     e?.preventDefault();
-    if (isLoading) return;
+    if (isLoading || !url.trim()) return;
 
-    if (showAltInput) {
-      if (altTab === 'paste' && pastedText.trim()) {
-        onAnalyze({
-          transcriptText: pastedText.trim(),
-          title: 'Custom Transcript',
-          author: 'Pasted Text',
-          fileType: 'txt'
-        });
-        return;
-      }
-
-      if (altTab === 'upload' && uploadedFile) {
-        const reader = new FileReader();
-        const ext = uploadedFile.name.split('.').pop().toLowerCase();
-        reader.onload = (event) => {
-          onAnalyze({
-            transcriptText: event.target.result,
-            title: uploadedFile.name.replace(/\.[^/.]+$/, ''),
-            author: 'Uploaded File',
-            fileType: ext
-          });
-        };
-        reader.readAsText(uploadedFile);
-        return;
-      }
+    if (isGoogleDriveLink) {
+      onAnalyze({
+        isGoogleDrive: true,
+        googleDriveUrl: url.trim(),
+        title: 'Google Drive Podcast'
+      });
+      return;
     }
-
-    if (!url.trim()) return;
 
     // Extract 11-char YouTube ID
     const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|shorts\/|live\/|watch\?.+&v=))([\w-]{11})/);
     const videoId = match ? match[1] : (url.trim().length === 11 ? url.trim() : null);
 
     if (!videoId) {
-      alert('Please enter a valid YouTube video link (e.g. https://www.youtube.com/watch?v=...)');
+      alert('Please enter a valid YouTube or Google Drive link.');
       return;
     }
 
     onAnalyze({ videoId });
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setUploadedFile(file);
+  const handleSubmitLaptopVideo = () => {
+    if (!laptopVideoFile || isLoading) return;
+    onUploadFile(laptopVideoFile);
+  };
+
+  const handleSubmitTranscript = () => {
+    if (pastedText.trim()) {
+      onAnalyze({
+        transcriptText: pastedText.trim(),
+        title: 'Custom Transcript',
+        author: 'Pasted Dialogue',
+        fileType: 'txt'
+      });
+      return;
+    }
+
+    if (uploadedTranscriptFile) {
+      const reader = new FileReader();
+      const ext = uploadedTranscriptFile.name.split('.').pop().toLowerCase();
+      reader.onload = (event) => {
+        onAnalyze({
+          transcriptText: event.target.result,
+          title: uploadedTranscriptFile.name.replace(/\.[^/.]+$/, ''),
+          author: 'Uploaded Subtitles',
+          fileType: ext
+        });
+      };
+      reader.readAsText(uploadedTranscriptFile);
     }
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto py-8 px-4 sm:px-6">
+      
       {/* Hero Headline */}
       <div className="text-center mb-8">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 text-xs font-semibold uppercase tracking-wider mb-4 animate-fade-in">
@@ -134,33 +145,77 @@ export default function HeroInput({
           </span>
         </h1>
         <p className="text-base sm:text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-          Paste a video link. ClipScout pinpoints the highest-retention hooks, writes high-CTR titles & trending hashtags, and prepares ready-to-download clips for YouTube Studio.
+          Paste a YouTube or Google Drive link, or upload directly from your laptop. ClipScout finds meaningful, high-retention moments and prepares ready-to-upload clips.
         </p>
       </div>
 
-      {/* Main Input Card */}
+      {/* Main Container Card */}
       <div className="relative rounded-2xl bg-studio-900/90 border border-studio-700/80 shadow-2xl backdrop-blur-xl p-4 sm:p-6 transition-all duration-300 hover:border-violet-500/30">
         
-        {/* URL Form */}
-        {!showAltInput ? (
-          <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Source Mode Tabs */}
+        <div className="flex items-center gap-2 pb-4 mb-5 border-b border-studio-800 overflow-x-auto scrollbar-none">
+          <button
+            type="button"
+            onClick={() => setActiveTab('link')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+              activeTab === 'link'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/20'
+                : 'text-zinc-400 hover:text-white hover:bg-studio-800'
+            }`}
+          >
+            <Youtube className="w-4 h-4 text-red-400" />
+            <span>YouTube / Google Drive Link</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('laptop')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+              activeTab === 'laptop'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/20'
+                : 'text-zinc-400 hover:text-white hover:bg-studio-800'
+            }`}
+          >
+            <Laptop className="w-4 h-4 text-amber-400" />
+            <span>Upload from Laptop (MP4 / MOV)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('transcript')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+              activeTab === 'transcript'
+                ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-violet-600/20'
+                : 'text-zinc-400 hover:text-white hover:bg-studio-800'
+            }`}
+          >
+            <FileText className="w-4 h-4 text-emerald-400" />
+            <span>Paste Transcript (.SRT / Text)</span>
+          </button>
+        </div>
+
+        {/* TAB 1: Link Input (YouTube & Google Drive) */}
+        {activeTab === 'link' && (
+          <form onSubmit={handleSubmitLink} className="space-y-4">
             <div className="relative flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-              {/* YouTube Icon & Input Field */}
               <div className="relative flex-1 flex items-center">
                 <div className="absolute left-4 pointer-events-none flex items-center justify-center">
-                  <Youtube className="w-6 h-6 text-red-500" />
+                  {isGoogleDriveLink ? (
+                    <HardDrive className="w-6 h-6 text-emerald-400" />
+                  ) : (
+                    <Youtube className="w-6 h-6 text-red-500" />
+                  )}
                 </div>
                 <input
-                  id="youtube-url-input"
+                  id="video-url-input"
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="Paste YouTube podcast link (e.g. https://www.youtube.com/watch?v=...)"
+                  placeholder="Paste YouTube or Google Drive link..."
                   className="w-full pl-12 pr-20 py-4 rounded-xl bg-studio-950/80 border border-studio-700 text-white placeholder-zinc-500 text-base focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500 transition shadow-inner"
                   disabled={isLoading}
                 />
                 
-                {/* Clear or Paste Button */}
                 <div className="absolute right-3 flex items-center gap-1.5">
                   {url ? (
                     <button
@@ -185,11 +240,10 @@ export default function HeroInput({
                 </div>
               </div>
 
-              {/* Generate Shorts Primary Button */}
               <button
                 type="submit"
                 disabled={isLoading || !url.trim()}
-                className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 active:scale-[0.98] text-white font-semibold text-base shadow-lg shadow-violet-600/25 transition disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shrink-0"
+                className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 active:scale-[0.98] text-white font-semibold text-base shadow-lg shadow-violet-600/25 transition disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
               >
                 {isLoading ? (
                   <>
@@ -205,9 +259,17 @@ export default function HeroInput({
               </button>
             </div>
 
+            {/* Google Drive Link Help Note */}
+            {isGoogleDriveLink && (
+              <div className="flex items-center gap-2 text-xs text-emerald-300/90 bg-emerald-950/30 border border-emerald-500/20 p-2.5 rounded-lg">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Google Drive video detected! Ensure the link access is set to <strong>"Anyone with the link can view"</strong> so ClipScout can extract audio for Whisper transcription.</span>
+              </div>
+            )}
+
             {/* Quick Samples Section */}
             <div className="pt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-              <span className="font-medium text-zinc-500">Try a sample:</span>
+              <span className="font-medium text-zinc-500">Try a sample podcast:</span>
               {SAMPLE_PODCASTS.map((sample) => (
                 <button
                   key={sample.id}
@@ -227,97 +289,92 @@ export default function HeroInput({
               ))}
             </div>
           </form>
-        ) : (
-          /* Alternative Paste / Upload Area */
+        )}
+
+        {/* TAB 2: Upload Video from Laptop */}
+        {activeTab === 'laptop' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b border-studio-800 pb-3">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAltTab('paste')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                    altTab === 'paste' 
-                      ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30' 
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <FileText className="w-4 h-4 inline mr-1.5" />
-                  Paste Transcript
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAltTab('upload')}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                    altTab === 'upload' 
-                      ? 'bg-violet-600/20 text-violet-300 border border-violet-500/30' 
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <Upload className="w-4 h-4 inline mr-1.5" />
-                  Upload (.srt, .vtt, .txt)
-                </button>
+            <div className="border-2 border-dashed border-studio-700/80 hover:border-violet-500/50 rounded-2xl p-8 text-center transition bg-studio-950/40">
+              <div className="w-12 h-12 rounded-2xl bg-violet-600/15 border border-violet-500/30 text-violet-400 flex items-center justify-center mx-auto mb-3">
+                <Video className="w-6 h-6" />
               </div>
+              <p className="text-sm font-bold text-white mb-1">
+                {laptopVideoFile ? laptopVideoFile.name : 'Drag & drop your podcast or video file here'}
+              </p>
+              <p className="text-xs text-zinc-400 mb-4">
+                Supports MP4, MOV, WebM, MKV, MP3, WAV. ClipScout transcribes via Groq Whisper in seconds.
+              </p>
+
+              <label className="inline-block px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold cursor-pointer transition shadow-md shadow-violet-600/20">
+                Browse Video from Laptop
+                <input
+                  type="file"
+                  accept="video/*,audio/*,.mp4,.mov,.webm,.mkv,.mp3,.wav,.m4a"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setLaptopVideoFile(f);
+                  }}
+                  className="hidden"
+                />
+              </label>
+
+              {laptopVideoFile && (
+                <div className="mt-5 p-3 rounded-xl bg-studio-900 border border-studio-750 flex items-center justify-between gap-3 text-left max-w-md mx-auto">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white truncate">{laptopVideoFile.name}</p>
+                    <p className="text-[11px] text-zinc-400">
+                      {(laptopVideoFile.size / (1024 * 1024)).toFixed(1)} MB
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSubmitLaptopVideo}
+                    disabled={isLoading}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shrink-0 shadow-md shadow-emerald-600/20"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Auto-Transcribe & Generate</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: Paste or Upload Transcript */}
+        {activeTab === 'transcript' && (
+          <div className="space-y-4">
+            <textarea
+              rows={6}
+              value={pastedText}
+              onChange={(e) => setPastedText(e.target.value)}
+              placeholder="Paste podcast dialogue or transcript here... (Supports timestamps like 00:01:23 or plain text)"
+              className="w-full p-4 rounded-xl bg-studio-950/80 border border-studio-700 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500"
+            />
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <label className="text-xs text-zinc-400 hover:text-white cursor-pointer inline-flex items-center gap-1.5">
+                <Upload className="w-3.5 h-3.5 text-violet-400" />
+                <span>Or upload .srt / .vtt file</span>
+                <input
+                  type="file"
+                  accept=".srt,.vtt,.txt"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setUploadedTranscriptFile(f);
+                  }}
+                  className="hidden"
+                />
+              </label>
 
               <button
                 type="button"
-                onClick={() => setShowAltInput(false)}
-                className="text-xs text-zinc-400 hover:text-white"
+                onClick={handleSubmitTranscript}
+                disabled={isLoading || (!pastedText.trim() && !uploadedTranscriptFile)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs transition disabled:opacity-50"
               >
-                Back to YouTube Link
+                Analyze Transcript
               </button>
             </div>
-
-            {altTab === 'paste' ? (
-              <div>
-                <textarea
-                  rows={6}
-                  value={pastedText}
-                  onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="Paste podcast transcript or dialogue here... (Supports timestamps like 00:01:23 or plain text)"
-                  className="w-full p-4 rounded-xl bg-studio-950/80 border border-studio-700 text-white placeholder-zinc-500 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/50 focus:border-violet-500"
-                />
-                <div className="flex justify-between items-center mt-2 text-xs text-zinc-500">
-                  <span>{pastedText.split(/\s+/).filter(Boolean).length} words</span>
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={isLoading || !pastedText.trim()}
-                    className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-medium transition disabled:opacity-50"
-                  >
-                    Analyze Transcript
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="border-2 border-dashed border-studio-700 rounded-xl p-8 text-center hover:border-violet-500/50 transition">
-                <Upload className="w-8 h-8 text-zinc-400 mx-auto mb-2" />
-                <p className="text-sm text-zinc-300 font-medium mb-1">
-                  {uploadedFile ? uploadedFile.name : 'Choose a transcript file (.srt, .vtt, .txt)'}
-                </p>
-                <p className="text-xs text-zinc-500 mb-4">Max file size 5MB</p>
-                <label className="inline-block px-4 py-2 rounded-lg bg-studio-800 hover:bg-studio-700 text-white text-xs font-semibold cursor-pointer transition">
-                  Browse Files
-                  <input
-                    type="file"
-                    accept=".srt,.vtt,.txt"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-                {uploadedFile && (
-                  <div className="mt-4">
-                    <button
-                      type="button"
-                      onClick={handleSubmit}
-                      disabled={isLoading}
-                      className="px-5 py-2.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-medium text-sm transition"
-                    >
-                      Extract Shorts from {uploadedFile.name}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 
@@ -330,18 +387,8 @@ export default function HeroInput({
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-violet-400" />
             <span>Customize Duration & Style</span>
-            <span className="text-zinc-600">({options.duration} • {options.clipCount} clips)</span>
+            <span className="text-zinc-500 font-mono">({options.duration}s • {options.clipCount} clips)</span>
           </button>
-
-          {!showAltInput && (
-            <button
-              type="button"
-              onClick={() => setShowAltInput(true)}
-              className="text-zinc-400 hover:text-violet-300 transition"
-            >
-              Or upload video/transcript file →
-            </button>
-          )}
         </div>
 
         {/* Options Panel */}
@@ -383,19 +430,24 @@ export default function HeroInput({
                   <Sparkles className="w-3.5 h-3.5 inline mr-1 text-amber-400" />
                   Clips to Extract
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[3, 5, 8].map((count) => (
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { count: 5, label: '5 Clips' },
+                    { count: 10, label: '10 Clips (Default)' },
+                    { count: 15, label: '15 Clips' },
+                    { count: 20, label: '20 Clips' }
+                  ].map(({ count, label }) => (
                     <button
                       key={count}
                       type="button"
                       onClick={() => setOptions({ ...options, clipCount: count })}
-                      className={`py-2 rounded-lg text-center transition font-medium ${
+                      className={`py-2 px-2.5 rounded-lg text-center transition font-medium text-xs ${
                         options.clipCount === count
-                          ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200'
+                          ? 'bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold'
                           : 'bg-studio-850/60 text-zinc-400 hover:text-zinc-200 hover:bg-studio-800/50'
                       }`}
                     >
-                      {count} Clips
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -405,14 +457,14 @@ export default function HeroInput({
               <div>
                 <label className="block text-zinc-400 font-semibold mb-2">
                   <Flame className="w-3.5 h-3.5 inline mr-1 text-red-400" />
-                  Hook Focus
+                  Meaningful Story Focus
                 </label>
                 <div className="flex flex-col gap-1.5">
                   {[
-                    { id: 'viral_hooks', label: '🔥 Maximum Virality' },
-                    { id: 'mindset', label: '💡 Mindset & Wisdom' },
-                    { id: 'funny', label: '😂 Banter & Fun' },
-                    { id: 'debate', label: '⚔️ Hot Takes & Debate' }
+                    { id: 'viral_hooks', label: '🔥 High-Retention Viral Hooks' },
+                    { id: 'mindset', label: '💡 Mindset & Breakthrough Insights' },
+                    { id: 'funny', label: '😂 Banter & Fun Moments' },
+                    { id: 'debate', label: '⚔️ Hot Takes & Controversial Debate' }
                   ].map((f) => (
                     <button
                       key={f.id}

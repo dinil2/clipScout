@@ -79,7 +79,17 @@ export const handler = async (event) => {
 
       let segments = [];
 
-      if (videoId) {
+      if (Array.isArray(payload.transcriptSegments) && payload.transcriptSegments.length > 0) {
+        // Pre-transcribed segments (e.g. from Groq Whisper laptop upload or Google Drive)
+        segments = payload.transcriptSegments;
+        if (payload.video) {
+          metadata = {
+            ...metadata,
+            ...payload.video,
+            videoId: payload.video.videoId || videoId || 'custom-source'
+          };
+        }
+      } else if (videoId) {
         if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
           return {
             statusCode: 400,
@@ -220,11 +230,7 @@ export const handler = async (event) => {
         };
       }
 
-      const finalClips = [];
-
-      for (let i = 0; i < topCandidates.length; i++) {
-        const candidate = topCandidates[i];
-
+      const packagePromises = topCandidates.map(async (candidate, i) => {
         // 1. Sentence Boundary Snapping & Duration Enforcement
         const rawStart = candidate.suggestedStartSec !== undefined ? candidate.suggestedStartSec : candidate.startSec;
         const rawEnd = candidate.suggestedEndSec !== undefined ? candidate.suggestedEndSec : candidate.endSec;
@@ -241,7 +247,7 @@ export const handler = async (event) => {
         const sliceSegments = segments.filter(s => s.endSec > snapped.startSec && s.startSec < snapped.endSec);
         const transcriptSlice = sliceSegments.map(s => s.text).join(' ').trim();
 
-        if (!transcriptSlice) continue;
+        if (!transcriptSlice) return null;
 
         // 3. Generate campaign-aware package via LLM
         const prompt = buildClipPackagingPrompt(
@@ -260,7 +266,7 @@ export const handler = async (event) => {
             hookText: candidate.text.slice(0, 35).trim(),
             title: candidate.text.slice(0, 55).trim(),
             description: `Key moment from ${payload.video?.title || 'video'}: "${transcriptSlice.slice(0, 100)}..."`,
-            hashtags: campaign.requiredHashtags || ['#ContentRewards', '#Shorts'],
+            hashtags: ['#shorts', '#podcast'],
             pinnedComment: 'What is your take on this moment? Share below! 👇',
             editingTip: 'Punch-in zoom 1.2x on opening hook statement',
             evidenceQuote: transcriptSlice.slice(0, 25).trim()
@@ -317,9 +323,11 @@ export const handler = async (event) => {
 
         // 7. Rules check
         clipObject.rulesCheck = validateClipAgainstRules(clipObject, campaign);
+        return clipObject;
+      });
 
-        finalClips.push(clipObject);
-      }
+      const packagedResults = await Promise.all(packagePromises);
+      const finalClips = packagedResults.filter(Boolean);
 
       // Sort descending by virality score
       finalClips.sort((a, b) => b.viralityScore - a.viralityScore);
