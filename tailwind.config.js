@@ -8,39 +8,38 @@ export default {
   theme: {
     extend: {
       colors: {
-        studio: {
-          950: '#07080a',
-          900: '#0d0f14',
-          850: '#12151c',
-          800: '#181c25',
-          700: '#242a38',
-          600: '#343c4f',
-          500: '#4e5870',
+        bg: '#0B0C10',
+        surface: '#12141B',
+        'surface-2': '#191C25',
+        border: '#262A36',
+        text: '#F4F5F7',
+        muted: '#A1A7B5',
+        accent: {
+          DEFAULT: '#FFB020',
+          hover: '#E59D17',
+          active: '#CC8A10',
+          ink: '#1A1203'
         },
-        brand: {
-          500: '#f59e0b',
-          400: '#fbbf24',
-          300: '#fcd34d',
-        }
+        success: '#34D399',
+        danger: '#F87171'
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
       },
-      animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'fade-in': 'fadeIn 0.25s ease-out forwards',
-        'slide-up': 'slideUp 0.3s ease-out forwards',
+      borderRadius: {
+        card: '12px',
+        control: '10px'
       },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        }
+      boxShadow: {
+        card: '0 4px 20px -2px rgba(0, 0, 0, 0.45)',
+        accent: '0 0 20px -3px rgba(255, 176, 32, 0.25)'
+      },
+      maxWidth: {
+        container: '1360px'
+      },
+      transitionDuration: {
+        DEFAULT: '150ms'
       }
     },
   },

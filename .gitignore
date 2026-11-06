@@ -22,6 +22,10 @@ dist-ssr/
 .env.test.local
 .env.production.local
 
+# Engine data & storage
+.engine_data/
+data/
+
 # Editor directories
 .vscode/*
 !.vscode/extensions.json

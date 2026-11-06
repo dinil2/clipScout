@@ -1,561 +1,208 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import Header from './components/Header.jsx';
-import HeroInput from './components/HeroInput.jsx';
-import ProcessingState from './components/ProcessingState.jsx';
-import VideoBanner from './components/VideoBanner.jsx';
-import ClipCard from './components/ClipCard.jsx';
-import DownloadModal from './components/DownloadModal.jsx';
-import SettingsModal from './components/SettingsModal.jsx';
-import Toast from './components/Toast.jsx';
-import { 
-  Sparkles, Flame, Clock, Scissors, SlidersHorizontal, 
-  RotateCcw, AlertCircle, Share2, Download, Copy, Check,
-  Laptop, FileText
-} from 'lucide-react';
+import React, { useState } from 'react';
+import Header from './components/studio/Header.jsx';
+import Hero from './components/studio/Hero.jsx';
+import SourceCard from './components/studio/SourceCard.jsx';
+import StageProgress from './components/studio/StageProgress.jsx';
+import ClipGrid from './components/studio/ClipGrid.jsx';
+import SettingsDrawer from './components/studio/SettingsDrawer.jsx';
+import OfflineState from './components/studio/OfflineState.jsx';
+import Banner from './components/ui/Banner.jsx';
+import Button from './components/ui/Button.jsx';
+import Toast from './components/ui/Toast.jsx';
 
-import { loadUserPasscode } from './utils/storage.js';
+import { useEngine } from './hooks/useEngine.js';
+import { useJob } from './hooks/useJob.js';
+import { loadSettings } from './lib/storage.js';
+import { RotateCcw, AlertCircle, ArrowLeft } from 'lucide-react';
 
 export default function App() {
-  // Main State
-  const [status, setStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'error'
-  const [progress, setProgress] = useState({ message: '', percent: 0 });
-  const [error, setError] = useState(null);
-
-  // Video & Clips Data
-  const [videoData, setVideoData] = useState(null);
-  const [clips, setClips] = useState([]);
-  const [sortOption, setSortOption] = useState('virality'); // 'virality' | 'chronological' | 'duration'
-  const [initialInputTab, setInitialInputTab] = useState('link'); // 'link' | 'laptop' | 'transcript'
-
-  // User Preferences
-  const [options, setOptions] = useState({
-    duration: '30-60', // '15-30' | '30-60' | '60-90'
-    clipCount: 10,     // 5 | 10 | 15 | 20
-    focus: 'viral_hooks' // 'viral_hooks' | 'mindset' | 'funny' | 'debate'
-  });
-
-  // Modals & Feedback
-  const [toastMessage, setToastMessage] = useState(null);
+  const { isConnected, isChecking, checkConnection } = useEngine();
+  const [options, setOptions] = useState(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [downloadModal, setDownloadModal] = useState({ isOpen: false, clip: null, videoId: null });
-  const [copiedAllBatch, setCopiedAllBatch] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
 
-  // Restore cached clips from localStorage on load
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem('clipscout_current_session_v3');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed.videoData && parsed.clips?.length > 0) {
-          setVideoData(parsed.videoData);
-          setClips(parsed.clips);
-          setStatus('success');
-        }
-      }
-    } catch {}
-  }, []);
+  const {
+    jobId,
+    status,
+    stage,
+    progress,
+    uploadPercent,
+    notice,
+    error,
+    video,
+    clips,
+    startJob,
+    uploadAndStartJob,
+    cancel,
+    reset
+  } = useJob();
 
-  // Save session when clips update
-  useEffect(() => {
-    if (status === 'success' && videoData && clips.length > 0) {
-      try {
-        localStorage.setItem('clipscout_current_session_v3', JSON.stringify({
-          videoData,
-          clips
-        }));
-      } catch {}
-    }
-  }, [status, videoData, clips]);
+  const isProcessing = status === 'uploading' || status === 'running';
+  const hasClips = clips.length > 0;
+  const isFinished = status === 'completed';
+
+  const handleStartUrl = (url) => {
+    startJob(url, options);
+  };
+
+  const handleUploadFile = (file) => {
+    uploadAndStartJob(file, options);
+  };
 
   const showToast = (msg) => {
     setToastMessage(msg);
   };
 
-  // -------------------------------------------------------------
-  // Pipeline: Fetch Source -> Score Candidate Windows -> Package Shorts
-  // -------------------------------------------------------------
-  const handleAnalyze = async (sourcePayload) => {
-    setStatus('loading');
-    setError(null);
-    setProgress({ message: 'Connecting to video source...', percent: 10 });
-
-    const userPasscode = loadUserPasscode();
-    const commonHeaders = {
-      'Content-Type': 'application/json',
-      ...(userPasscode ? { 'x-app-passcode': userPasscode } : {})
-    };
-
-    try {
-      let activePayload = { ...sourcePayload };
-
-      // Case: Google Drive Link -> Transcribe with Groq Whisper first
-      if (sourcePayload.isGoogleDrive && sourcePayload.googleDriveUrl) {
-        setProgress({ message: 'Connecting to Google Drive & transcribing speech with Whisper...', percent: 20 });
-        const transcribeRes = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: sourcePayload.googleDriveUrl, title: sourcePayload.title })
-        });
-        const transcribeData = await transcribeRes.json();
-        if (!transcribeRes.ok || !transcribeData.success) {
-          throw new Error(transcribeData.error || 'Failed to transcribe Google Drive audio. Ensure link is public.');
-        }
-
-        activePayload = {
-          videoId: transcribeData.video.videoId,
-          video: transcribeData.video,
-          transcriptSegments: transcribeData.transcriptSegments
-        };
-      }
-
-      // -------------------------------------------------------------
-      // STAGE 1: Fetch Video Metadata & Real Speech Segments
-      // -------------------------------------------------------------
-      setProgress({ message: 'Fetching video metadata and speech transcript...', percent: 25 });
-
-      let minClipSec = 30;
-      let maxClipSec = 58;
-      if (options.duration === '15-30') {
-        minClipSec = 15;
-        maxClipSec = 30;
-      } else if (options.duration === '60-90') {
-        minClipSec = 58;
-        maxClipSec = 90;
-      }
-
-      const stage1Res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: commonHeaders,
-        body: JSON.stringify({
-          action: 'fetch_source',
-          ...activePayload,
-          campaign: {
-            minClipSec,
-            maxClipSec,
-            focus: options.focus
-          }
-        })
-      });
-
-      if (!stage1Res.ok) {
-        const errText = await stage1Res.text();
-        let parsedErr = 'Failed to fetch source video. Please check the URL.';
-        try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
-        throw new Error(parsedErr);
-      }
-
-      const stage1Data = await stage1Res.json();
-      if (!stage1Data.success) {
-        throw new Error(stage1Data.error || 'Failed to fetch source video. Please check the URL.');
-      }
-
-      const { video, transcriptSegments, candidateWindows } = stage1Data;
-      setVideoData(video);
-
-      if (!candidateWindows || candidateWindows.length === 0) {
-        throw new Error('No spoken dialogue or candidate clips found in source transcript.');
-      }
-
-      // -------------------------------------------------------------
-      // STAGE 2: Score Candidate Windows with LLM
-      // -------------------------------------------------------------
-      // Support requested clip count (5, 10, 15, 20) by scaling candidate batch size
-      const requestedClips = options.clipCount || 10;
-      const candidateBatchSize = Math.min(candidateWindows.length, Math.max(12, Math.round(requestedClips * 1.5)));
-      const topBatch = candidateWindows.slice(0, candidateBatchSize);
-
-      // Split into batches of 8 candidate windows
-      const chunks = [];
-      for (let i = 0; i < topBatch.length; i += 8) {
-        chunks.push(topBatch.slice(i, i + 8));
-      }
-
-      let scoredWindows = [];
-      for (let idx = 0; idx < chunks.length; idx++) {
-        const chunk = chunks[idx];
-        setProgress({ 
-          message: `AI analyzing conversation for viral hooks (${idx * 8 + 1}–${Math.min((idx + 1) * 8, topBatch.length)} of ${topBatch.length})...`, 
-          percent: 35 + Math.round(((idx + 1) / chunks.length) * 30) 
-        });
-
-        const stage2Res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: commonHeaders,
-          body: JSON.stringify({
-            action: 'score_batch',
-            batch: chunk,
-            campaign: {
-              minClipSec,
-              maxClipSec,
-              focus: options.focus
-            }
-          })
-        });
-
-        if (!stage2Res.ok) {
-          const errText = await stage2Res.text();
-          let parsedErr = 'AI scoring temporarily unavailable. Please try again.';
-          try { parsedErr = JSON.parse(errText).error || parsedErr; } catch {}
-          throw new Error(parsedErr);
-        }
-
-        const stage2Data = await stage2Res.json();
-        if (stage2Data.scoredWindows) {
-          scoredWindows.push(...stage2Data.scoredWindows);
-        }
-      }
-
-      if (scoredWindows.length === 0) {
-        throw new Error('No candidate moments passed anti-hallucination verification.');
-      }
-
-      // Sort candidate windows descending by virality score
-      scoredWindows.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
-
-      // Limit to user's desired clipCount (5, 10, 15, 20)
-      const topSelected = scoredWindows.slice(0, Math.min(requestedClips, scoredWindows.length));
-
-      // -------------------------------------------------------------
-      // STAGE 3: Sentence Snapping & YouTube Shorts Packaging
-      // Chunked into pairs (2 clips per call, ~3.5s) to stay safely under serverless timeout limits
-      // -------------------------------------------------------------
-      const packageChunkSize = 2;
-      const generatedClips = [];
-
-      for (let i = 0; i < topSelected.length; i += packageChunkSize) {
-        const chunkCandidates = topSelected.slice(i, i + packageChunkSize);
-        const percent = Math.min(95, 70 + Math.round(((i + chunkCandidates.length) / topSelected.length) * 25));
-        setProgress({ 
-          message: `Locking sentence boundaries and packaging Shorts (${Math.min(i + chunkCandidates.length, topSelected.length)} of ${topSelected.length})...`, 
-          percent 
-        });
-
-        try {
-          const stage3Res = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: commonHeaders,
-            body: JSON.stringify({
-              action: 'package_clips',
-              video,
-              topCandidates: chunkCandidates,
-              transcriptSegments,
-              campaign: {
-                minClipSec,
-                maxClipSec,
-                focus: options.focus
-              }
-            })
-          });
-
-          if (stage3Res.ok) {
-            const stage3Data = await stage3Res.json();
-            if (stage3Data.clips && Array.isArray(stage3Data.clips)) {
-              generatedClips.push(...stage3Data.clips);
-            }
-          } else {
-            console.warn(`Packaging chunk ${i} returned status ${stage3Res.status}`);
-          }
-        } catch (chunkErr) {
-          console.warn(`Chunk packaging warning for batch starting at ${i}:`, chunkErr);
-        }
-      }
-
-      if (generatedClips.length === 0) {
-        throw new Error('No clips could be successfully formed. Please try another focus option.');
-      }
-
-      // Re-rank and sort descending by virality
-      generatedClips.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
-      generatedClips.forEach((c, idx) => { c.rank = idx + 1; });
-
-      setProgress({ message: 'Clips ready!', percent: 100 });
-      setClips(generatedClips);
-      setStatus('success');
-      showToast(`✨ Generated ${generatedClips.length} ready-to-upload YouTube Shorts!`);
-
-    } catch (err) {
-      console.error('Pipeline error:', err);
-      setError(err.message || 'An unexpected error occurred.');
-      setStatus('error');
-    }
-  };
-
-  // Handle uploading video file from laptop
-  const handleUploadFile = async (file) => {
-    setStatus('loading');
-    setError(null);
-    setProgress({ message: `Uploading ${file.name} and extracting audio...`, percent: 15 });
-
-    try {
-      const localBlobUrl = URL.createObjectURL(file);
-
-      // Transcribe via /api/transcribe
-      setProgress({ message: `AI transcribing speech with Groq Whisper...`, percent: 35 });
-
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: {
-          'x-filename': encodeURIComponent(file.name)
-        },
-        body: file
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to transcribe local video file.');
-      }
-
-      const uploadedVideoMeta = {
-        ...data.video,
-        localBlobUrl
-      };
-
-      // Feed into main analysis pipeline
-      await handleAnalyze({
-        videoId: uploadedVideoMeta.videoId,
-        video: uploadedVideoMeta,
-        transcriptSegments: data.transcriptSegments
-      });
-
-    } catch (err) {
-      console.error('Laptop upload error:', err);
-      setError(err.message || 'Failed to process laptop video file.');
-      setStatus('error');
-    }
-  };
-
-  const handleReset = (targetTab = 'link') => {
-    setStatus('idle');
-    setVideoData(null);
-    setClips([]);
-    setError(null);
-    setInitialInputTab(targetTab);
-    try {
-      localStorage.removeItem('clipscout_current_session_v3');
-    } catch {}
-  };
-
-  const handleDownloadErrorFallback = (data, clip) => {
-    setDownloadModal({
-      isOpen: true,
-      clip,
-      videoId: videoData?.videoId
-    });
-  };
-
-  // Copy entire batch of all clips
-  const handleCopyAllBatch = () => {
-    if (clips.length === 0) return;
-    const batchText = clips.map((c, i) => {
-      const tags = (c.trendingHashtags || c.hashtags || []).join(' ');
-      return `=== CLIP #${i + 1}: ${c.title} (${c.startTime} - ${c.endTime}) ===\n\nTitle: ${c.title}\n\nDescription:\n${c.description}\n\nHashtags:\n${tags}\n\n`;
-    }).join('\n----------------------------------------\n\n');
-
-    navigator.clipboard.writeText(batchText);
-    setCopiedAllBatch(true);
-    showToast('Copied all clips data to clipboard!');
-    setTimeout(() => setCopiedAllBatch(false), 2500);
-  };
-
-  // Sorted clips
-  const sortedClips = useMemo(() => {
-    const list = [...clips];
-    if (sortOption === 'virality') {
-      return list.sort((a, b) => (b.viralityScore || 0) - (a.viralityScore || 0));
-    }
-    if (sortOption === 'chronological') {
-      return list.sort((a, b) => (a.startSeconds || 0) - (b.startSeconds || 0));
-    }
-    if (sortOption === 'duration') {
-      return list.sort((a, b) => (a.durationSeconds || 0) - (b.durationSeconds || 0));
-    }
-    return list;
-  }, [clips, sortOption]);
-
   return (
-    <div className="min-h-screen bg-[#07080a] text-zinc-100 flex flex-col font-sans selection:bg-violet-500/30 selection:text-white">
+    <div className="min-h-screen bg-bg text-text flex flex-col antialiased selection:bg-accent selection:text-accent-ink">
       
-      {/* Top Header */}
+      {/* 1. Header */}
       <Header
-        clipsCount={clips.length}
-        onReset={() => handleReset('link')}
+        isEngineConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
+        onReset={reset}
       />
 
-      {/* Main Content Area */}
-      <main className="flex-1 w-full pb-16">
+      {/* Main Flow Container */}
+      <main className="flex-1 w-full max-w-container mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-8">
         
-        {/* ============================================================== */}
-        {/* IDLE STATE: Hero Input Section                                 */}
-        {/* ============================================================== */}
-        {status === 'idle' && (
-          <HeroInput
-            onAnalyze={handleAnalyze}
-            onUploadFile={handleUploadFile}
-            isLoading={false}
-            options={options}
-            setOptions={setOptions}
-            initialTab={initialInputTab}
-          />
-        )}
-
-        {/* ============================================================== */}
-        {/* LOADING STATE: Real-time Multi-stage Progress Visualizer       */}
-        {/* ============================================================== */}
-        {status === 'loading' && (
-          <ProcessingState
-            progress={progress}
-            videoData={videoData}
-            onCancel={() => handleReset('link')}
-          />
-        )}
-
-        {/* ============================================================== */}
-        {/* ERROR STATE: Clean error card with retry/paste options         */}
-        {/* ============================================================== */}
-        {status === 'error' && (
-          <div className="w-full max-w-xl mx-auto py-16 px-4 animate-fade-in text-center">
-            <div className="rounded-2xl bg-studio-900 border border-studio-700/80 p-8 shadow-2xl space-y-4">
-              <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto">
-                <AlertCircle className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-bold text-white">Analysis Could Not Complete</h3>
-              <p className="text-sm text-zinc-400 leading-relaxed">
-                {error || 'An unexpected issue occurred while extracting clips from the source.'}
-              </p>
-              <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-2.5">
-                <button
-                  onClick={() => handleReset('link')}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition"
-                >
-                  Try Another Link
-                </button>
-                <button
-                  onClick={() => handleReset('laptop')}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-studio-800 hover:bg-studio-700 border border-studio-700 text-zinc-200 font-semibold text-sm transition flex items-center justify-center gap-2"
-                >
-                  <Laptop className="w-4 h-4 text-violet-400" />
-                  Upload Video File
-                </button>
-                <button
-                  onClick={() => handleReset('transcript')}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-studio-800 hover:bg-studio-700 border border-studio-700 text-zinc-200 font-semibold text-sm transition flex items-center justify-center gap-2"
-                >
-                  <FileText className="w-4 h-4 text-emerald-400" />
-                  Paste Transcript
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* SUCCESS STATE: Results Feed & YouTube Studio Ready Package     */}
-        {/* ============================================================== */}
-        {status === 'success' && (
-          <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 animate-fade-in">
-            
-            {/* Video Overview Banner */}
-            <VideoBanner
-              video={videoData}
-              clipsCount={clips.length}
-              onReset={handleReset}
-            />
-
-            {/* Results Toolbar */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-studio-800">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-extrabold text-white flex items-center gap-2">
-                  <span>Viral YouTube Shorts</span>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold">
-                    {clips.length} Ready
-                  </span>
-                </h2>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Download the MP4 or copy the package directly into YouTube Studio.
-                </p>
-              </div>
-
-              {/* Sort Controls & Batch Copy */}
-              <div className="flex items-center gap-2.5 flex-wrap w-full sm:w-auto justify-end">
-                <div className="flex items-center gap-1 bg-studio-900 border border-studio-800 rounded-xl p-1 text-xs">
-                  <span className="text-zinc-500 px-2 font-medium">Sort:</span>
-                  {[
-                    { id: 'virality', label: '🔥 Virality' },
-                    { id: 'chronological', label: '⏱️ Timeline' },
-                    { id: 'duration', label: '⏳ Length' }
-                  ].map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setSortOption(s.id)}
-                      className={`px-2.5 py-1 rounded-lg transition font-medium ${
-                        sortOption === s.id
-                          ? 'bg-studio-800 text-white font-semibold shadow-sm'
-                          : 'text-zinc-400 hover:text-zinc-200'
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+        {/* If Engine is offline while on idle, show friendly action recovery box */}
+        {!isConnected && status === 'idle' ? (
+          <OfflineState onRetry={checkConnection} isChecking={isChecking} />
+        ) : (
+          <>
+            {/* If connection hiccup occurs while job is active, show subtle reconnection banner without unmounting */}
+            {!isConnected && status !== 'idle' && (
+              <div className="w-full max-w-4xl mx-auto -mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center justify-between text-xs text-amber-300">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span>Reconnecting to local engine in background...</span>
                 </div>
-
                 <button
                   type="button"
-                  onClick={handleCopyAllBatch}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-studio-850 hover:bg-studio-800 border border-studio-700/80 text-zinc-200 hover:text-white text-xs font-semibold transition"
-                  title="Copy titles, descriptions & tags for all clips"
+                  onClick={checkConnection}
+                  disabled={isChecking}
+                  className="px-2.5 py-1 bg-surface border border-border hover:bg-surface-hover rounded text-text font-medium transition-colors"
                 >
-                  {copiedAllBatch ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="text-emerald-300">Copied All</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Copy All Data</span>
-                    </>
-                  )}
+                  {isChecking ? 'Checking...' : 'Check now'}
                 </button>
               </div>
-            </div>
+            )}
 
-            {/* Clips Grid */}
-            <div className="space-y-6">
-              {sortedClips.map((clip) => (
-                <ClipCard
-                  key={clip.id}
-                  clip={clip}
-                  videoData={videoData}
-                  onShowToast={showToast}
-                  onDownloadError={handleDownloadErrorFallback}
-                />
-              ))}
-            </div>
+            {/* STAGE A: Hero Input (Only on Idle or after Reset) */}
+            {status === 'idle' && (
+              <Hero
+                onSubmitUrl={handleStartUrl}
+                onUploadFile={handleUploadFile}
+                isProcessing={isProcessing}
+                uploadPercent={uploadPercent}
+                options={options}
+                setOptions={setOptions}
+                showGuideStrip={!hasClips}
+              />
+            )}
 
-          </div>
+            {/* STAGE B: Active Processing or Completed Session */}
+            {status !== 'idle' && (
+              <div className="w-full flex flex-col gap-6 max-w-4xl mx-auto">
+                
+                {/* Back to Input Navigation when Done or Failed */}
+                {(isFinished || status === 'failed' || status === 'cancelled') && (
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={reset}
+                      className="inline-flex items-center gap-1.5 text-xs sm:text-sm text-muted hover:text-text cursor-pointer transition-colors"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      <span>Start new video</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Source Card */}
+                {video && <SourceCard video={video} />}
+
+                {/* Active Progress Stage Card (while uploading or processing) */}
+                {isProcessing && (
+                  <StageProgress
+                    stage={stage}
+                    progress={progress}
+                    notice={notice}
+                    onCancel={cancel}
+                  />
+                )}
+
+                {/* Error Banner with Retry */}
+                {status === 'failed' && (
+                  <Banner
+                    type="error"
+                    action={
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={reset}
+                        className="text-xs"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 mr-1" />
+                        <span>Try another link</span>
+                      </Button>
+                    }
+                  >
+                    <div className="font-semibold text-danger">Processing stopped</div>
+                    <div className="text-xs text-text mt-0.5">{error || 'An unexpected error occurred.'}</div>
+                  </Banner>
+                )}
+
+                {/* Cancelled Banner */}
+                {status === 'cancelled' && (
+                  <Banner
+                    type="info"
+                    action={
+                      <Button variant="secondary" size="sm" onClick={reset}>
+                        <span>New Job</span>
+                      </Button>
+                    }
+                  >
+                    <span>Job was cancelled.</span>
+                  </Banner>
+                )}
+
+                {/* Clips Grid (appears as soon as clips start rendering!) */}
+                {(hasClips || (isProcessing && stage === 'cutting_clips')) && (
+                  <ClipGrid
+                    clips={clips}
+                    jobId={jobId}
+                    isRendering={isProcessing}
+                    targetClipCount={Number(options.clipCount) || 10}
+                    onShowToast={showToast}
+                    className="mt-4"
+                  />
+                )}
+
+              </div>
+            )}
+          </>
         )}
 
       </main>
 
-      {/* Fallback Download Modal (when running in cloud serverless) */}
-      <DownloadModal
-        isOpen={downloadModal.isOpen}
-        clip={downloadModal.clip || {}}
-        videoId={downloadModal.videoId}
-        onClose={() => setDownloadModal({ isOpen: false, clip: null, videoId: null })}
-        onNotify={showToast}
-      />
+      {/* Footer */}
+      <footer className="w-full border-t border-border/40 py-6 text-center text-xs text-muted">
+        <div className="max-w-container mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>ClipScout — $0 Local Podcast to Shorts Studio</span>
+          <span>Single-User Architecture • Local FFmpeg & Groq Whisper</span>
+        </div>
+      </footer>
 
-      {/* Settings Modal */}
-      <SettingsModal
+      {/* Settings Drawer */}
+      <SettingsDrawer
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onNotify={showToast}
+        onSettingsSaved={(newSettings) => setOptions(newSettings)}
       />
 
-      {/* Toast Notification */}
+      {/* Toast Feedback */}
       <Toast
         message={toastMessage}
         onClose={() => setToastMessage(null)}

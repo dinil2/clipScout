@@ -1,20 +1,27 @@
 {
   "name": "clipscout",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "engine": "node engine/src/server.js",
+    "app": "vite build && node engine/src/server.js",
+    "update:ytdlp": "yt-dlp -U",
     "test": "vitest run"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
+    "@fastify/multipart": "^10.1.6",
+    "@fastify/static": "^10.1.8",
+    "archiver": "^8.0.0",
     "dotenv": "^16.4.7",
+    "fastify": "^5.12.7",
     "lucide-react": "^0.475.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "youtube-transcript": "^1.3.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {

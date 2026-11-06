@@ -1,148 +1,148 @@
-# 🎬 ClipScout — Content Rewards Clipping Assistant
+# 🎬 ClipScout — AI Podcast to YouTube Shorts Studio
 
-> **🌐 Live Production URL:** [https://clipscout-ai.netlify.app](https://clipscout-ai.netlify.app)  
-> **📦 GitHub Repository:** [https://github.com/dinil2/clipScout](https://github.com/dinil2/clipScout)
-
----
-
-## 🌟 Overview
-**ClipScout** is a high-reliability, zero-hallucination **Content Rewards clipping assistant** designed for creators participating in payout campaigns (such as ContentRewards.com).
-
-Unlike generic AI clipping tools that fabricate timestamps, guess story arcs, or pad fake virality scores, ClipScout:
-1. Grounded strictly in authentic spoken transcripts (YouTube captions, or user-pasted / uploaded `.srt`, `.vtt`, `.txt` files).
-2. Uses sliding windows across **100% of the transcript timeline** rather than discarding 95% of speech.
-3. Scores moments deterministically using 4 distinct sub-scores (Hook, Standalone Clarity, Emotion & Payoff, Campaign Fit).
-4. Snaps clip boundaries to real sentence edges and enforces campaign duration limits (15–58s).
-5. Validates every clip against campaign rules: required hashtags, required @mentions, and banned words.
-6. Generates authentic `.SRT` subtitle tracks derived exclusively from real spoken words.
-7. Tracks clips across workflow states (*Found*, *Editing*, *Posted*, *Submitted*) and calculates estimated view-based earnings against campaign CPM rates and per-clip caps.
+> **Single-User Snazo-Style Clipper running at $0 with No Sign-In.**  
+> Turn full-length podcasts into viral, vertical 9:16 MP4 clips with burned-in animated captions, titles, descriptions, and hashtags formatted for YouTube Studio.
 
 ---
 
-## 🚀 Key Features
+## 🌟 What ClipScout Does
 
-- **🎯 Campaign-Driven Evaluation**: Set rules, CPM rates, per-clip caps, required hashtags/mentions, and banned topics. The active campaign guides AI prompt scoring, boundary snapping, and compliance validation.
-- **🛡️ Zero Hallucinations**: No fake padding, no default scores, no canned text. If a YouTube video lacks captions, the app honestly informs the user and invites them to paste or upload a transcript.
-- **🔍 4-Factor Virality Sub-Scores (AI Estimate)**: Evaluates:
-  - *Hook* (0–25)
-  - *Standalone Clarity* (0–25)
-  - *Emotion & Payoff* (0–25)
-  - *Campaign Fit* (0–25)
-  - *Composite Score* (0–100) calculated deterministically in code.
-- **✂️ Sentence Boundary Snapping**: Refines raw start and end timestamps to natural sentence endings and speech pauses within ~3 seconds.
-- **📋 Campaign Compliance Checklist**: Immediate pass/fail indicator per clip checking duration limits, required tags, required @mentions, and banned words.
-- **📊 Earnings & Workflow Tracker**: Record posted clip URLs and views to track actual estimated earnings (`views / 1000 * CPM`), capped at the campaign maximum.
-- **💾 Offline JSON Backup & Privacy**: All campaign data and clip tracking stays private in your browser's `localStorage`. Includes one-click JSON export and import backups.
-- **🔐 Quota Protection**: Optional shared passcode protection (`APP_PASSCODE` in Netlify, `x-app-passcode` header) and origin-restricted CORS prevent unauthorized spending of your LLM quota.
-- **⚡ Safe Clip Export**: Production provides copy-ready `yt-dlp` CLI commands for selective 1080p downloads. Direct local 1080p MP4 download via Python + FFmpeg is supported in dev with `VITE_ENABLE_LOCAL_DOWNLOAD=true`.
+ClipScout provides a calm, premium studio workflow designed for **one creator** to process their own podcast episodes without subscriptions, cloud server costs, or artificial restrictions:
+
+1. **Source Ingestion**: Paste a YouTube or public Google Drive link, or drop a video file directly from your laptop (`.mp4`, `.mov`, `.webm`, `.mkv`).
+2. **Dialogue Transcription**:
+   - Downloads official YouTube captions via `yt-dlp` (manual creator tracks first, then auto-generated WebVTT).
+   - If captions do not exist (or for Google Drive and laptop uploads), extracts 16 kHz mono audio and transcribes with Groq Whisper (`whisper-large-v3-turbo`) using silence-aware chunking (<= 10 min, < 24 MB per request) with overlap deduplication.
+   - Caches transcripts on disk by fingerprint for instant subsequent re-runs.
+3. **Viral Moments Extraction**:
+   - Scans 100% of the speech timeline with sliding candidate windows.
+   - Evaluates 4 distinct sub-scores (0–25 each, totaling 0–100 calculated in code):
+     - **Hook** (0–25): Immediate attention grab in the opening 3 seconds.
+     - **Standalone Clarity** (0–25): Self-contained idea; penalizes dangling context.
+     - **Emotion & Payoff** (0–25): Intellectual realization, emotional punch, or humor.
+     - **Retention** (0–25): Ends on a strong beat with high replay appeal.
+   - Snaps clip timestamps to authentic sentence pauses (Short 20–40s, Standard 30–60s, Long 60–120s, hard cap 180s).
+   - Verifies verbatim evidence quotes against the source transcript (zero hallucinated clips).
+4. **9:16 Vertical Video Rendering with Burned-In Captions**:
+   - Cuts exact clips with FFmpeg accurate seeking (`libx264`, `preset veryfast`, `crf 20`, `aac 128k`, `+faststart`).
+   - Scales the original video centered over an aesthetically blurred, scaled background copy of itself.
+   - Generates and burns in animated subtitles via `libass` using the bundled open-license **Inter** font with bold white text, thick black outline, and active word highlighting in `#FFB020`.
+   - Verifies each output clip with `ffprobe` before marking ready.
+5. **YouTube Studio Package**:
+   - **Download MP4**: 1-click download of the rendered 1080x1920 MP4 video clip.
+   - **Copy for YouTube Studio**: 1-click copy of Title (under 70 chars with #Shorts), Description, and Hashtags (3–5 tags, always includes `#Shorts`, hard cap 15).
+   - **Captions .srt**: Download synchronized subtitle file.
+   - **Download All (ZIP)**: Stream a complete package archive of all clips, subtitles, and a `clips.txt` index.
 
 ---
 
-## 🛠️ Architecture
+## 💰 How It Runs at $0 Cost
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   ClipScout Frontend                   │
-│      React 18 + Vite + Tailwind CSS (Studio Dark)      │
-│  [Campaign Brief] -> [Source Input] -> [Clips] -> [Tracker]
-└───────────────▲────────────────────────▲───────────────┘
-                │                        │
-         POST /api/analyze        GET /api/download
-                │                        │
-┌───────────────▼───────────────┐ ┌──────▼───────────────┐
-│     Netlify Serverless Fn     │ │ Safe Download Helper │
-│ (netlify/functions/analyze.js)│ │ (download.js / CLI)  │
-├───────────────────────────────┤ ├──────────────────────┤
-│ • Auth & Passcode Guard       │ │ • yt-dlp CLI command │
-│ • oEmbed Metadata Fetcher     │ │ • Dev-only Python    │
-│ • Universal Transcript Normal.│ │   clipper bridge     │
-│ • 90s/30s Sliding Windows     │ │   (server/clipper.py)│
-│ • Heuristic Pre-Ranking (25)  │ └──────────────────────┘
-│ • Groq Cloud / Gemini REST    │
-│ • Zod Strict Schema Check     │
-│ • Anti-Hallucination Verify   │
-│ • Sentence Boundary Snapping  │
-│ • Campaign Rules Validator    │
-└───────────────────────────────┘
+ClipScout requires no paid subscriptions, no monthly cloud servers, and no paid database:
+
+| Component | Technology | Cost |
+| :--- | :--- | :--- |
+| **Compute & Rendering** | Local PC CPU/GPU via FFmpeg & yt-dlp | **$0** (Free, Open Source) |
+| **Speech-to-Text** | Groq Cloud Whisper (`whisper-large-v3-turbo`) | **$0** (Free Tier: 25 MB/req, generous RPM) |
+| **AI Evaluation & Copy** | Groq Cloud LLM (`openai/gpt-oss-120b`, `qwen/qwen3.8-27b`) or Gemini 2.5 Flash | **$0** (Free Tier) |
+| **Trending Tags (Optional)** | YouTube Data API v3 Search | **$0** (Free Daily Quota: 10,000 units) |
+| **Application Server** | Fastify (Node 20) on `127.0.0.1:8787` | **$0** (Localhost) |
+
+---
+
+## 🛠️ System Prerequisites
+
+To run ClipScout locally, install **Node.js 20+**, **FFmpeg** (with libass enabled), and **yt-dlp**:
+
+### Windows
+```powershell
+# Using Winget (recommended)
+winget install Gyan.FFmpeg
+winget install yt-dlp.yt-dlp
+winget install OpenJS.NodeJS.LTS
 ```
 
+### macOS
+```bash
+# Using Homebrew
+brew install node ffmpeg yt-dlp
+```
+
+### Linux (Ubuntu / Debian)
+```bash
+sudo apt update
+sudo apt install -y nodejs npm ffmpeg
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+```
+
 ---
 
-## 💻 Local Development Setup
+## 🚀 Quickstart
 
-### Prerequisites
-- **Node.js** (v18 or higher)
-- **npm** (v9 or higher)
-- *(Optional for local 1080p dev downloads)*: **Python 3.10+**, `yt-dlp`, and **FFmpeg** in PATH.
-
-### 1. Clone the Repository
+### 1. Clone & Install Dependencies
 ```bash
 git clone https://github.com/dinil2/clipScout.git
 cd clipScout
-```
-
-### 2. Install Dependencies
-```bash
 npm install
 ```
 
-### 3. Configure Environment Variables
-Create a `.env` file in the project root:
+### 2. Configure Environment (`.env`)
+Copy the example file and add your free Groq API key:
+```bash
+cp .env.example .env
+```
+Edit `.env`:
 ```env
-# Groq API Key (from console.groq.com)
+# Free key from https://console.groq.com/keys
 GROQ_API_KEY=gsk_your_groq_api_key_here
 
-# Optional: Google Gemini API Key
+# Optional: Google Gemini API Key from https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=
 
-# Optional: Shared passcode protecting API calls
-APP_PASSCODE=
+# Optional: YouTube Data API Key for trending tags from https://console.cloud.google.com
+YOUTUBE_API_KEY=
 
-# Optional: Enable local 1080p download via Python clipper (dev-only)
-VITE_ENABLE_LOCAL_DOWNLOAD=false
+# Optional: Port and security token
+ENGINE_PORT=8787
+ENGINE_DATA_DIR=./.engine_data
+ENGINE_TOKEN=
 ```
 
-### 4. Run Unit Tests
+### 3. Launch ClipScout
+Run the all-in-one command:
 ```bash
-npm test
+npm run app
 ```
-
-### 5. Launch Local Dev Server
-```bash
-npm run dev
-```
-Open **[http://localhost:5173](http://localhost:5173)** in your browser.
+This builds the React frontend with Vite and starts the Fastify Engine at:
+👉 **[http://127.0.0.1:8787](http://127.0.0.1:8787)**
 
 ---
 
-## 🌐 Deployment to Netlify
+## 🔄 Keeping yt-dlp Updated
 
-1. Push your repository to GitHub.
-2. In the Netlify dashboard, select **"Import from Git"**.
-3. Build configuration (configured in `netlify.toml`):
-   - **Build command**: `npm run build`
-   - **Publish directory**: `dist`
-   - **Functions directory**: `netlify/functions`
-4. Set Environment Variables in Netlify **Site Configuration > Environment Variables**:
-   - `GROQ_API_KEY`: Your Groq API key
-   - `APP_PASSCODE`: *(Optional)* Secret passcode required to invoke analysis
-5. Deploy the site.
+YouTube frequently updates video stream formats. To keep yt-dlp working seamlessly:
+```bash
+npm run update:ytdlp
+```
 
 ---
 
 ## 🧪 Testing
 
-ClipScout includes a comprehensive test suite powered by **Vitest**:
+Run all unit tests (VTT/SRT parsers, audio chunking, sentence snapping, ASS subtitle generation, FFmpeg argument builders, and hashtag limits):
 ```bash
 npm test
 ```
-Tests cover:
-- `tests/transcriptParser.test.js`: YouTube offset normalization, SRT, VTT, and relative `.srt` clip generation.
-- `tests/snapping.test.js`: Sentence boundary snapping, tolerance windows, and duration constraints.
-- `tests/scoring.test.js`: Deterministic composite scoring, sub-score clamps, and CPM earnings caps.
-- `tests/rulesCheck.test.js`: Compliance validation for durations, required hashtags, mentions, and banned words.
 
 ---
 
-## 📜 License
-MIT License. Built for creator productivity and Content Rewards clippers.
+## ❓ Troubleshooting
+
+| Issue | Cause | Solution |
+| :--- | :--- | :--- |
+| **"Engine is Offline"** | Node engine process not running on port 8787 | Run `npm run app` in your terminal. |
+| **"Missing libass"** | FFmpeg was compiled without `--enable-libass` | Install a full FFmpeg build (e.g. `winget install Gyan.FFmpeg` on Windows, or `brew install ffmpeg` on macOS). |
+| **"Free limit reached"** | Groq free tier rate limit encountered | ClipScout automatically pauses with a countdown and resumes safely without failing. |
+| **"Google Drive video not public"** | Link sharing is restricted | In Google Drive, click Share -> change to **"Anyone with the link can view"**, or upload the `.mp4` file directly. |
+| **"YouTube bot check"** | YouTube restricted unauthenticated stream | Set `YTDLP_COOKIES_FROM_BROWSER=chrome` in `.env` or upload the file directly. |
