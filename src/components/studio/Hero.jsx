@@ -3,6 +3,7 @@ import { Sparkles, Clipboard, ArrowRight, Video, UploadCloud, Link as LinkIcon }
 import Button from '../ui/Button.jsx';
 import Segmented from '../ui/Segmented.jsx';
 import Dropzone from '../ui/Dropzone.jsx';
+import CustomTimestamps from './CustomTimestamps.jsx';
 import { CLIP_COUNT_OPTIONS, DURATION_PRESETS, FORMAT_OPTIONS } from '../../lib/constants.js';
 
 export default function Hero({
@@ -17,6 +18,7 @@ export default function Hero({
   const [url, setUrl] = useState('');
   const [showUploadMode, setShowUploadMode] = useState(false);
   const [inputError, setInputError] = useState('');
+  const [customRanges, setCustomRanges] = useState([]);
 
   const handlePaste = async () => {
     try {
@@ -49,7 +51,11 @@ export default function Hero({
     }
 
     setInputError('');
-    onSubmitUrl(trimmed);
+    const validCustomRanges = customRanges
+      .filter(r => r.start?.trim() && r.end?.trim())
+      .map(r => ({ start: r.start.trim(), end: r.end.trim() }));
+
+    onSubmitUrl(trimmed, validCustomRanges);
   };
 
   return (
@@ -132,7 +138,12 @@ export default function Hero({
         ) : (
           <div className="w-full flex flex-col items-center gap-3">
             <Dropzone
-              onFileSelected={onUploadFile}
+              onFileSelected={(file) => {
+                const validCustomRanges = customRanges
+                  .filter(r => r.start?.trim() && r.end?.trim())
+                  .map(r => ({ start: r.start.trim(), end: r.end.trim() }));
+                onUploadFile(file, validCustomRanges);
+              }}
               isUploading={isProcessing}
               uploadPercent={uploadPercent}
             />
@@ -179,6 +190,12 @@ export default function Hero({
           />
         </div>
       </div>
+
+      {/* Under all 3 things under format: Favorite Timestamps (Optional) */}
+      <CustomTimestamps
+        ranges={customRanges}
+        onChange={setCustomRanges}
+      />
 
       {/* Quiet 3-Step Strip (shown only before first run) */}
       {showGuideStrip && (

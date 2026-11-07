@@ -5,7 +5,7 @@ import { planAudioChunks, deduplicateOverlapSegments } from '../src/services/whi
 import { generateAndPreRankWindows } from '../src/lib/windows.js';
 import { calculateTotalScore, scoreWindowHeuristic } from '../src/lib/scoring.js';
 import { snapToSentenceBoundaries } from '../src/lib/snapping.js';
-import { buildFfmpegFilterGraph, buildFfmpegRenderArgs } from '../src/services/render.js';
+import { buildFfmpegFilterGraph, buildFfmpegRenderArgs, batchDownloadSectionsWithYtdlp } from '../src/services/render.js';
 import { generateAssSubtitles, buildWordChunks, ASS_COLORS } from '../src/lib/ass.js';
 import { buildClipHashtags, normalizeTag } from '../src/services/hashtags.js';
 import { sourceUrlSchema, verifyEvidenceQuote } from '../src/lib/validate.js';
@@ -223,8 +223,16 @@ describe('7. FFmpeg Filter Graph & Render Args', () => {
     expect(args).toContain('veryfast');
     expect(args).toContain('-crf');
     expect(args).toContain('20');
+    expect(args).toContain('-threads');
+    expect(args).toContain('2');
     expect(args).toContain('-movflags');
     expect(args).toContain('+faststart');
+  });
+
+  it('safely handles empty clips array in batchDownloadSectionsWithYtdlp', async () => {
+    const res = await batchDownloadSectionsWithYtdlp('https://youtube.com', [], 'outputDir');
+    expect(res).toBeInstanceOf(Map);
+    expect(res.size).toBe(0);
   });
 });
 
@@ -265,4 +273,33 @@ describe('9. URL Validation & Anti-Hallucination Guard', () => {
     expect(verifyEvidenceQuote('this quote was never said', transcript)).toBe(false);
   });
 });
+
+describe('10. Custom Timestamp Ranges & Priority', () => {
+  it('prioritizes creator pinned timestamps as Clip #1 with top priority score', async () => {
+    const { findPodcastMoments } = await import('../src/services/analysis.js');
+    const segments = [
+      { startSec: 4740, endSec: 4760, text: 'This is the carbonara moment right here.' },
+      { startSec: 4760, endSec: 4787, text: 'It tastes absolutely fantastic and crispy.' },
+      { startSec: 5000, endSec: 5040, text: 'Another conversation later in the podcast.' }
+    ];
+
+    const clips = await findPodcastMoments(segments, {
+      clipCount: 1,
+      customRanges: [
+        { start: '01:19:00', end: '01:19:47', label: 'S-Tier Carbonara' }
+      ]
+    });
+
+    expect(clips).toHaveLength(1);
+    expect(clips[0].id).toBe('clip-1');
+    expect(clips[0].rank).toBe(1);
+    expect(clips[0].isPinned).toBe(true);
+    expect(clips[0].startSeconds).toBe(4740);
+    expect(clips[0].endSeconds).toBe(4787);
+    expect(clips[0].durationSeconds).toBe(47);
+    expect(clips[0].title).toContain('S-Tier Carbonara');
+    expect(clips[0].viralityScore).toBe(100);
+  });
+});
+
 

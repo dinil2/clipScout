@@ -9,11 +9,12 @@ export default function ClipGrid({
   jobId,
   isRendering = false,
   targetClipCount = 10,
+  currentClipProgress = null,
   onShowToast,
+  onRerenderClip,
   className = ''
 }) {
-  const renderedClips = clips.filter(c => c.rendered);
-  const pendingCount = isRendering ? Math.max(0, targetClipCount - renderedClips.length) : 0;
+  const readyClips = clips.filter(c => c.rendered);
   const zipUrl = defaultEngineClient.getZipDownloadUrl(jobId);
 
   return (
@@ -23,19 +24,19 @@ export default function ClipGrid({
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-border/80">
         <div className="flex items-center gap-3">
           <div className="h-9 px-3 rounded-control bg-accent/15 text-accent border border-accent/25 flex items-center justify-center font-bold font-mono text-sm">
-            {renderedClips.length} {renderedClips.length === 1 ? 'Clip' : 'Clips'}
+            {readyClips.length} {readyClips.length === 1 ? 'Clip' : 'Clips'}
           </div>
           <div>
             <h2 className="text-lg sm:text-xl font-bold text-text">
-              {renderedClips.length} {renderedClips.length === 1 ? 'Clip' : 'Clips'} Ready
+              {readyClips.length} {readyClips.length === 1 ? 'Clip' : 'Clips'} Ready
             </h2>
             <p className="text-xs text-muted">
-              {isRendering ? `Rendering remaining moments in the background...` : `Vertical 9:16 MP4s with burned-in subtitles`}
+              {isRendering ? `Rendering remaining clips with hook titles & captions...` : `Vertical 9:16 Shorts with burned yellow captions`}
             </p>
           </div>
         </div>
 
-        {renderedClips.length > 0 && (
+        {readyClips.length > 0 && (
           <a
             href={zipUrl}
             download
@@ -49,18 +50,20 @@ export default function ClipGrid({
 
       {/* Responsive Grid: 1 col on mobile/tablet/laptop, 2 cols on wide screens (>= 1280px) */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 sm:gap-7 w-full">
-        {/* Rendered live clips */}
-        {renderedClips.map((clip) => (
+        {/* Render all detected clips (including any currently rendering or with error) */}
+        {clips.map((clip) => (
           <ClipCard
             key={clip.id}
             clip={clip}
             jobId={jobId}
+            currentClipProgress={currentClipProgress}
             onShowToast={onShowToast}
+            onRerenderClip={onRerenderClip}
           />
         ))}
 
-        {/* Skeleton placeholders while cutting */}
-        {isRendering && Array.from({ length: pendingCount }).map((_, idx) => (
+        {/* Skeleton placeholder only if no clips received yet during rendering */}
+        {isRendering && clips.length === 0 && Array.from({ length: Math.min(4, targetClipCount) }).map((_, idx) => (
           <ClipSkeletonCard key={`skel-${idx}`} />
         ))}
       </div>
@@ -68,4 +71,3 @@ export default function ClipGrid({
     </div>
   );
 }
-

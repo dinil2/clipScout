@@ -7,14 +7,15 @@ describe('Studio Configuration & Defaults', () => {
   it('has valid default options for podcast Shorts generation', () => {
     expect(DEFAULT_OPTIONS.clipCount).toBe(10);
     expect(DEFAULT_OPTIONS.durationPreset).toBe('standard');
-    expect(DEFAULT_OPTIONS.format).toBe('vertical');
+    expect(DEFAULT_OPTIONS.format).toBe('title_video');
     expect(DEFAULT_OPTIONS.burnedCaptions).toBe(true);
+    expect(DEFAULT_OPTIONS.censor).toBe(true);
   });
 
   it('defines valid options for clip counts and presets', () => {
     expect(CLIP_COUNT_OPTIONS.map(c => c.value)).toEqual([5, 10, 15, 20]);
     expect(DURATION_PRESETS.map(d => d.value)).toEqual(['short', 'standard', 'long']);
-    expect(FORMAT_OPTIONS.map(f => f.value)).toEqual(['vertical', 'original']);
+    expect(FORMAT_OPTIONS.map(f => f.value)).toEqual(['title_video', 'vertical', 'original']);
   });
 });
 
@@ -48,4 +49,17 @@ describe('EngineClient API URL Formatting', () => {
     expect(eventsUrl).toBe('http://127.0.0.1:8787/jobs/job_123/events?token=secret-token-123');
   });
 });
+
+describe('Custom Timestamps Parser', () => {
+  it('parses HH:MM:SS and MM:SS correctly', async () => {
+    const { parseClockToSec } = await import('../src/components/studio/CustomTimestamps.jsx');
+    expect(parseClockToSec('01:19:00')).toBe(4740);
+    expect(parseClockToSec('01:19:47')).toBe(4787);
+    expect(parseClockToSec('19:00')).toBe(1140);
+    expect(parseClockToSec('19:47')).toBe(1187);
+    expect(parseClockToSec('45')).toBe(45);
+    expect(parseClockToSec('invalid')).toBe(null);
+  });
+});
+
 

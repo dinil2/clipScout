@@ -40,7 +40,7 @@ export const CONFIG = {
   WHISPER_MAX_CONCURRENCY: 2,
   
   // Video render constraints
-  RENDER_MAX_CONCURRENCY: 1, // Sequential rendering gives 100% CPU to each clip, showing results faster
+  RENDER_MAX_CONCURRENCY: parseInt(process.env.RENDER_MAX_CONCURRENCY || '2', 10), // Concurrency 2 processes clips in parallel, cutting wall-clock time in half
   MAX_CLIP_DURATION_SEC: 180, // YouTube Shorts maximum limit (3 min)
   
   // Bundled Assets

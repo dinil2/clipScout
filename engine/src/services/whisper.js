@@ -151,16 +151,26 @@ export async function transcribeChunkWithGroq(chunkAudioPath, timeOffsetSec = 0,
     formData.append('model', CONFIG.GROQ_WHISPER_MODEL);
     formData.append('response_format', 'verbose_json');
     formData.append('temperature', '0.0');
+    formData.append('language', 'en');
     formData.append('timestamp_granularities[]', 'segment');
     formData.append('timestamp_granularities[]', 'word');
 
-    const res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: formData
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60000);
+
+    let res;
+    try {
+      res = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        signal: controller.signal,
+        body: formData
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (res.status === 429) {
       const errText = await res.text();
@@ -178,18 +188,27 @@ export async function transcribeChunkWithGroq(chunkAudioPath, timeOffsetSec = 0,
     const data = await res.json();
     const rawSegments = data.segments || [];
 
+    // Map top-level words array from verbose_json response if present
+    const topLevelWords = Array.isArray(data.words) ? data.words.map(w => ({
+      word: (w.word || '').trim(),
+      start: Math.round((Number(w.start || 0) + timeOffsetSec) * 100) / 100,
+      end: Math.round((Number(w.end || 0) + timeOffsetSec) * 100) / 100
+    })).filter(w => w.word.length > 0) : [];
+
     const mappedSegments = rawSegments.map(s => {
       const startSec = Math.round((Number(s.start || 0) + timeOffsetSec) * 100) / 100;
       const endSec = Math.round((Number(s.end || 0) + timeOffsetSec) * 100) / 100;
       const text = cleanSubtitleText(s.text || '');
 
       let words = undefined;
-      if (Array.isArray(s.words)) {
+      if (Array.isArray(s.words) && s.words.length > 0) {
         words = s.words.map(w => ({
           word: (w.word || '').trim(),
           start: Math.round((Number(w.start || 0) + timeOffsetSec) * 100) / 100,
           end: Math.round((Number(w.end || 0) + timeOffsetSec) * 100) / 100
         })).filter(w => w.word.length > 0);
+      } else if (topLevelWords.length > 0) {
+        words = topLevelWords.filter(w => w.start >= startSec - 0.2 && w.end <= endSec + 0.2);
       }
 
       return { startSec, endSec, text, words };
@@ -245,7 +264,10 @@ export async function transcribeAudioWithChunking(fullAudioPath, totalDurationSe
         chunkAudioFile
       ];
 
-      await runProcess('ffmpeg', sliceArgs, { jobId });
+      const sliceRes = await runProcess('ffmpeg', sliceArgs, { jobId, timeoutMs: 60000 });
+      if (sliceRes.exitCode !== 0 || !fs.existsSync(chunkAudioFile) || fs.statSync(chunkAudioFile).size < 100) {
+        throw new Error(`Failed to slice audio chunk ${chunk.index}: ${sliceRes.stderr || 'ffmpeg error'}`);
+      }
 
       if (onProgress) {
         onProgress({

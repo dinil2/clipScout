@@ -143,6 +143,31 @@ export class EngineClient {
     const res = await fetch(url.toString(), { headers: this.getHeaders() });
     return res.json();
   }
+
+  async rerenderClip(jobId, clipId, options) {
+    const res = await fetch(`${this.baseUrl}/jobs/${jobId}/clips/${clipId}/rerender`, {
+      method: 'POST',
+      headers: this.getHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(options)
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to re-render clip.');
+    }
+    return data;
+  }
+
+  async listRecentJobs() {
+    try {
+      const res = await fetch(`${this.baseUrl}/jobs`, {
+        headers: this.getHeaders()
+      });
+      const data = await res.json();
+      return data?.jobs || [];
+    } catch {
+      return [];
+    }
+  }
 }
 
 export const defaultEngineClient = new EngineClient();

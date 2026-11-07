@@ -4,9 +4,9 @@
  * 1. Reading video (Metadata)
  * 2. Transcribing (YouTube VTT or chunked Groq Whisper)
  * 3. Finding moments (Sliding windows, AI evaluation, snapping)
- * 4. Cutting clips (ffmpeg 9:16 render with burned captions, SSE clip_ready events)
+ * 4. Cutting clips (ffmpeg 1:1 box on 9:16 black canvas with title & captions)
  *
- * Supports real-time SSE progress, cancellation, and ZIP export.
+ * Supports real-time SSE progress, cancellation, single-clip rerendering, and ZIP export.
  */
 
 import path from 'path';
@@ -66,7 +66,7 @@ export function registerEventListener(jobId, reply) {
   });
 
   // Send current state immediately on connect
-  const job = jobs.get(jobId);
+  const job = jobs.get(jobId) || getJob(jobId);
   if (job) {
     reply.raw.write(`event: state\ndata: ${JSON.stringify(getJobPublicState(job))}\n\n`);
   }
@@ -87,6 +87,7 @@ export function getJobPublicState(job) {
     options: job.options,
     video: job.video,
     clips: job.clips,
+    currentClipProgress: job.currentClipProgress || null,
     error: job.error,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt
@@ -95,13 +96,24 @@ export function getJobPublicState(job) {
 
 /**
  * Persists job state to disk in jobDir/job.json
+ * Writes transcript segments separately to prevent massive synchronous I/O.
  * @param {Object} job
  */
 export function persistJob(job) {
   if (!job || !job.jobDir) return;
   try {
     const jobFile = path.join(job.jobDir, 'job.json');
-    fs.writeFileSync(jobFile, JSON.stringify(job, null, 2), 'utf8');
+
+    // Save transcript separately once if present
+    if (job.transcriptSegments && Array.isArray(job.transcriptSegments)) {
+      const transcriptFile = path.join(job.jobDir, 'transcript.json');
+      if (!fs.existsSync(transcriptFile)) {
+        fs.writeFileSync(transcriptFile, JSON.stringify(job.transcriptSegments), 'utf8');
+      }
+    }
+
+    const { transcriptSegments, ...shallowJob } = job;
+    fs.writeFileSync(jobFile, JSON.stringify(shallowJob, null, 2), 'utf8');
   } catch {}
 }
 
@@ -112,19 +124,36 @@ export function persistJob(job) {
  */
 export function getJob(jobId) {
   if (jobs.has(jobId)) {
-    return jobs.get(jobId);
+    const job = jobs.get(jobId);
+    if (!job.transcriptSegments) {
+      loadTranscriptForJob(job);
+    }
+    return job;
   }
 
-  const jobFile = path.join(CONFIG.DATA_DIR, 'jobs', jobId, 'job.json');
+  const jobDir = path.join(CONFIG.DATA_DIR, 'jobs', jobId);
+  const jobFile = path.join(jobDir, 'job.json');
   if (fs.existsSync(jobFile)) {
     try {
       const data = JSON.parse(fs.readFileSync(jobFile, 'utf8'));
+      data.jobDir = jobDir;
+      loadTranscriptForJob(data);
       jobs.set(jobId, data);
       return data;
     } catch {}
   }
 
   return null;
+}
+
+function loadTranscriptForJob(job) {
+  if (!job || !job.jobDir) return;
+  const transcriptFile = path.join(job.jobDir, 'transcript.json');
+  if (fs.existsSync(transcriptFile)) {
+    try {
+      job.transcriptSegments = JSON.parse(fs.readFileSync(transcriptFile, 'utf8'));
+    } catch {}
+  }
 }
 
 /**
@@ -145,11 +174,77 @@ export async function checkDiskSpace() {
 }
 
 /**
+ * Recovers jobs that were left running when engine previously stopped
+ */
+export function recoverInterruptedJobs() {
+  const jobsBase = path.join(CONFIG.DATA_DIR, 'jobs');
+  if (!fs.existsSync(jobsBase)) return;
+
+  try {
+    const entries = fs.readdirSync(jobsBase, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const jobFile = path.join(jobsBase, ent.name, 'job.json');
+      if (fs.existsSync(jobFile)) {
+        try {
+          const job = JSON.parse(fs.readFileSync(jobFile, 'utf8'));
+          if (job.status === 'running' || job.status === 'pending') {
+            job.status = 'failed';
+            job.error = 'Job interrupted when engine stopped or restarted.';
+            job.updatedAt = new Date().toISOString();
+            fs.writeFileSync(jobFile, JSON.stringify(job, null, 2), 'utf8');
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
+/**
+ * Lists recent jobs from disk
+ * @param {number} [limit=15]
+ * @returns {Array<Object>}
+ */
+export function listRecentJobs(limit = 15) {
+  const jobsBase = path.join(CONFIG.DATA_DIR, 'jobs');
+  if (!fs.existsSync(jobsBase)) return [];
+
+  const list = [];
+  try {
+    const entries = fs.readdirSync(jobsBase, { withFileTypes: true });
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      const jobFile = path.join(jobsBase, ent.name, 'job.json');
+      if (fs.existsSync(jobFile)) {
+        try {
+          const j = JSON.parse(fs.readFileSync(jobFile, 'utf8'));
+          list.push({
+            id: j.id,
+            status: j.status,
+            stage: j.stage,
+            title: j.video?.title || j.source?.filename || 'Untitled Podcast',
+            thumbnail: j.video?.thumbnail || '',
+            durationFormatted: j.video?.durationFormatted || '',
+            clipCount: (j.clips || []).length,
+            renderedCount: (j.clips || []).filter(c => c.rendered).length,
+            createdAt: j.createdAt,
+            updatedAt: j.updatedAt
+          });
+        } catch {}
+      }
+    }
+  } catch {}
+
+  list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return list.slice(0, limit);
+}
+
+/**
  * Creates and starts a new processing job
  *
  * @param {Object} params
- * @param {Object} params.source - { type: 'youtube'|'drive'|'upload', url?: string, uploadId?: string }
- * @param {Object} params.options - { clipCount, durationPreset, format, burnedCaptions }
+ * @param {Object} params.source
+ * @param {Object} params.options
  * @returns {Promise<string>} jobId
  */
 export async function createJob(params) {
@@ -172,7 +267,12 @@ export async function createJob(params) {
     options: params.options || {
       clipCount: 10,
       durationPreset: 'standard',
-      format: 'vertical',
+      format: 'title_video',
+      framing: 'fill',
+      focusX: 0.5,
+      censor: true,
+      captionSize: 'medium',
+      quality: 'fast',
       burnedCaptions: true
     },
     video: null,
@@ -203,7 +303,20 @@ async function runJobPipeline(job) {
   job.status = 'running';
   job.updatedAt = new Date().toISOString();
 
+  let lastActivityTime = Date.now();
+  const watchdogTimer = setInterval(() => {
+    if (job.status !== 'running') {
+      clearInterval(watchdogTimer);
+      return;
+    }
+    // If no progress for 90s, log warning
+    if (Date.now() - lastActivityTime > 90000) {
+      console.warn(`Watchdog alert: Job ${id} has been waiting on stage "${job.stage}" for >90s.`);
+    }
+  }, 30000);
+
   const updateProgress = (stage, percent, message) => {
+    lastActivityTime = Date.now();
     job.stage = stage;
     job.progress = { percent, message };
     job.updatedAt = new Date().toISOString();
@@ -212,6 +325,7 @@ async function runJobPipeline(job) {
   };
 
   const handleNotice = (msg) => {
+    lastActivityTime = Date.now();
     emitJobEvent(id, 'notice', { message: msg });
   };
 
@@ -232,10 +346,13 @@ async function runJobPipeline(job) {
     job.video = videoMeta;
     emitJobEvent(id, 'video_loaded', videoMeta);
 
-    if (job.status === 'cancelled') return;
+    if (job.status === 'cancelled') {
+      clearInterval(watchdogTimer);
+      return;
+    }
 
     // -------------------------------------------------------------
-    // STAGE 2: Transcribing Speech
+    // STAGE 2: Transcribing Speech (English Only)
     // -------------------------------------------------------------
     updateProgress('transcribing', 20, 'Checking captions & transcribing dialogue...');
 
@@ -247,7 +364,10 @@ async function runJobPipeline(job) {
 
     job.transcriptSegments = transcriptResult.segments;
 
-    if (job.status === 'cancelled') return;
+    if (job.status === 'cancelled') {
+      clearInterval(watchdogTimer);
+      return;
+    }
 
     // -------------------------------------------------------------
     // STAGE 3: Finding Viral Moments
@@ -257,6 +377,7 @@ async function runJobPipeline(job) {
     const foundClips = await findPodcastMoments(job.transcriptSegments, {
       clipCount: options.clipCount,
       durationPreset: options.durationPreset,
+      customRanges: options.customRanges || [],
       onNotice: handleNotice,
       onProgress: (p) => updateProgress('finding_moments', 50 + Math.round((p.percent / 100) * 20), p.message)
     });
@@ -264,21 +385,31 @@ async function runJobPipeline(job) {
     job.clips = foundClips;
     emitJobEvent(id, 'moments_found', { clips: foundClips });
 
-    if (job.status === 'cancelled') return;
+    if (job.status === 'cancelled') {
+      clearInterval(watchdogTimer);
+      return;
+    }
 
     // -------------------------------------------------------------
     // STAGE 4: Cutting & Rendering 9:16 Clips with Captions
     // -------------------------------------------------------------
-    updateProgress('cutting_clips', 70, `Preparing to cut ${foundClips.length} vertical clips with burned captions...`);
+    updateProgress('cutting_clips', 70, `Preparing to cut ${foundClips.length} Shorts with hook titles & captions...`);
 
     const clipsOutputDir = path.join(jobDir, 'clips');
     fs.mkdirSync(clipsOutputDir, { recursive: true });
 
-    // Pre-cache full source video once if remote URL, eliminating concurrency collisions & WinError 32
+    // Smart download strategy:
+    // If video is > 25m (1500s) OR clip coverage is < 25%, use fast section download per clip.
+    const videoDuration = videoMeta.durationSec || 0;
+    const totalClipDuration = foundClips.reduce((sum, c) => sum + (c.durationSeconds || 30), 0);
+    const coverageRatio = videoDuration > 0 ? (totalClipDuration / videoDuration) : 1;
+    const preferSectionDownloads = videoMeta.sourceType !== 'local' && (videoDuration > 1500 || coverageRatio < 0.25);
+
     let fullSourceVideoPath = null;
+
     if (videoMeta.sourceType === 'local' && videoMeta.filePath) {
       fullSourceVideoPath = videoMeta.filePath;
-    } else {
+    } else if (!preferSectionDownloads) {
       updateProgress('cutting_clips', 71, 'Caching source video for high-speed offline clip cutting...');
       const cachedFullDir = path.join(CONFIG.DATA_DIR, 'sources', id);
       fs.mkdirSync(cachedFullDir, { recursive: true });
@@ -286,12 +417,14 @@ async function runJobPipeline(job) {
       fullSourceVideoPath = await downloadFullVideoCached(videoMeta.webpageUrl || videoMeta.url, cachedFullPath, id);
     }
 
-    if (job.status === 'cancelled') return;
+    if (job.status === 'cancelled') {
+      clearInterval(watchdogTimer);
+      return;
+    }
 
     let renderedCount = 0;
     const totalClips = foundClips.length;
 
-    // Concurrency limit of 2 renders at once
     const queue = [...foundClips];
     const workers = [];
 
@@ -302,6 +435,7 @@ async function runJobPipeline(job) {
         if (!clip) break;
 
         try {
+          const clipNumber = foundClips.findIndex(c => c.id === clip.id) + 1;
           const renderResult = await renderClip(
             clip,
             videoMeta,
@@ -309,9 +443,19 @@ async function runJobPipeline(job) {
             {
               jobId: id,
               outputDir: clipsOutputDir,
-              format: options.format || 'vertical',
+              format: options.format || 'title_video',
+              framing: clip.framing || options.framing || 'fill',
+              focusX: typeof clip.focusX === 'number' ? clip.focusX : (options.focusX ?? 0.5),
               burnedCaptions: options.burnedCaptions !== false,
-              fullVideoPath: fullSourceVideoPath
+              censor: options.censor !== false,
+              captionSize: options.captionSize || 'medium',
+              fullVideoPath: fullSourceVideoPath,
+              clipNumber,
+              totalClips,
+              onClipProgress: (progressData) => {
+                job.currentClipProgress = progressData;
+                emitJobEvent(id, 'clip_progress', progressData);
+              }
             }
           );
 
@@ -321,6 +465,7 @@ async function runJobPipeline(job) {
           clip.srtContent = renderResult.srtContent;
           clip.mp4Url = `/clips/${id}/${clip.id}.mp4`;
           clip.srtUrl = `/clips/${id}/${clip.id}.srt`;
+          delete clip.renderError;
 
           renderedCount++;
           const renderPct = 70 + Math.round((renderedCount / totalClips) * 28);
@@ -330,7 +475,9 @@ async function runJobPipeline(job) {
           emitJobEvent(id, 'clip_ready', { clip });
         } catch (clipErr) {
           console.error(`Error rendering clip ${clip.id}:`, clipErr);
+          clip.rendered = false;
           clip.renderError = clipErr.message;
+          emitJobEvent(id, 'clip_failed', { clipId: clip.id, error: clipErr.message });
         }
       }
     };
@@ -341,6 +488,8 @@ async function runJobPipeline(job) {
     }
 
     await Promise.all(workers);
+
+    clearInterval(watchdogTimer);
 
     if (job.status === 'cancelled') return;
 
@@ -353,13 +502,78 @@ async function runJobPipeline(job) {
     emitJobEvent(id, 'done', { clips: job.clips });
 
   } catch (err) {
+    clearInterval(watchdogTimer);
     if (job.status === 'cancelled') return;
     job.status = 'failed';
     job.error = err.message || 'Job processing failed.';
     job.updatedAt = new Date().toISOString();
     persistJob(job);
+    // Emit both job_error and error for backwards compatibility and EventSource error safety
+    emitJobEvent(id, 'job_error', { error: job.error });
     emitJobEvent(id, 'error', { error: job.error });
   }
+}
+
+/**
+ * Re-renders an individual clip with modified title, framing, or layout
+ *
+ * @param {string} jobId
+ * @param {string} clipId
+ * @param {Object} customOptions
+ * @returns {Promise<Object>} updated clip
+ */
+export async function rerenderClip(jobId, clipId, customOptions = {}) {
+  const job = getJob(jobId);
+  if (!job) throw new Error(`Job "${jobId}" not found.`);
+  const clip = (job.clips || []).find(c => c.id === clipId);
+  if (!clip) throw new Error(`Clip "${clipId}" not found in job.`);
+
+  if (customOptions.onScreenTitle !== undefined) {
+    clip.onScreenTitle = customOptions.onScreenTitle;
+  }
+  if (customOptions.framing) {
+    clip.framing = customOptions.framing;
+  }
+  if (typeof customOptions.focusX === 'number') {
+    clip.focusX = customOptions.focusX;
+  }
+
+  const clipsOutputDir = path.join(job.jobDir, 'clips');
+  const cachedFullPath = path.join(CONFIG.DATA_DIR, 'sources', jobId, 'full_source.mp4');
+  const fullVideoPath = fs.existsSync(cachedFullPath) ? cachedFullPath : (job.video?.filePath || null);
+
+  emitJobEvent(jobId, 'clip_rendering', { clipId });
+
+  const renderResult = await renderClip(
+    clip,
+    job.video,
+    job.transcriptSegments || [],
+    {
+      jobId,
+      outputDir: clipsOutputDir,
+      format: customOptions.layout || clip.format || job.options?.format || 'title_video',
+      framing: clip.framing || job.options?.framing || 'fill',
+      focusX: typeof clip.focusX === 'number' ? clip.focusX : (job.options?.focusX ?? 0.5),
+      censor: job.options?.censor !== false,
+      captionSize: job.options?.captionSize || 'medium',
+      burnedCaptions: job.options?.burnedCaptions !== false,
+      fullVideoPath
+    }
+  );
+
+  clip.rendered = true;
+  clip.mp4Path = renderResult.mp4Path;
+  clip.srtPath = renderResult.srtPath;
+  clip.srtContent = renderResult.srtContent;
+  clip.mp4Url = `/clips/${jobId}/${clip.id}.mp4?v=${Date.now()}`;
+  clip.srtUrl = `/clips/${jobId}/${clip.id}.srt?v=${Date.now()}`;
+  delete clip.renderError;
+
+  job.updatedAt = new Date().toISOString();
+  persistJob(job);
+
+  emitJobEvent(jobId, 'clip_ready', { clip });
+  return clip;
 }
 
 /**
@@ -376,7 +590,6 @@ export function cancelJob(jobId) {
 
   emitJobEvent(jobId, 'cancelled', { message: 'Job was cancelled by user.' });
 
-  // Clean up job directory
   try {
     if (fs.existsSync(job.jobDir)) {
       fs.rmSync(job.jobDir, { recursive: true, force: true });
@@ -392,7 +605,7 @@ export function cancelJob(jobId) {
  * @returns {archiver.Archiver}
  */
 export function createJobZipArchive(jobId) {
-  const job = jobs.get(jobId);
+  const job = getJob(jobId);
   if (!job || !job.clips) {
     throw new Error('Job not found or has no clips.');
   }
@@ -419,6 +632,7 @@ export function createJobZipArchive(jobId) {
     clipsTextLines.push(`CLIP #${clip.rank}: ${clip.title}`);
     clipsTextLines.push(`Time: ${clip.startTime} - ${clip.endTime} (${Math.round(clip.durationSeconds)}s)`);
     clipsTextLines.push(`Virality Score: ${clip.viralityScore}/100`);
+    clipsTextLines.push(`Hook Overlay Title: ${clip.onScreenTitle || clip.title}`);
     clipsTextLines.push(`\n[TITLE] (Copy for YouTube Studio):\n${clip.title}`);
     clipsTextLines.push(`\n[DESCRIPTION] (Copy for YouTube Studio):\n${clip.description}`);
     clipsTextLines.push(`\n[HASHTAGS]:\n${(clip.hashtags || []).join(' ')}`);
@@ -445,21 +659,6 @@ export function cleanupStaleJobs() {
         }
       } catch {}
       jobs.delete(id);
-    }
-  }
-
-  // Also sweep uploads folder for uploads older than 24 hours
-  const uploadsDir = path.join(CONFIG.DATA_DIR, 'uploads');
-  if (fs.existsSync(uploadsDir)) {
-    const files = fs.readdirSync(uploadsDir);
-    for (const f of files) {
-      const p = path.join(uploadsDir, f);
-      try {
-        const stat = fs.statSync(p);
-        if (now - stat.mtimeMs > maxAgeMs) {
-          fs.unlinkSync(p);
-        }
-      } catch {}
     }
   }
 }

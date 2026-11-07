@@ -19,7 +19,7 @@ import {
   printInstallInstructions, 
   verifyGroqModels 
 } from './config.js';
-import { cleanupStaleJobs } from './services/jobs.js';
+import { cleanupStaleJobs, recoverInterruptedJobs } from './services/jobs.js';
 
 import healthRoutes from './routes/health.js';
 import uploadsRoutes from './routes/uploads.js';
@@ -36,9 +36,29 @@ export async function buildServer() {
     bodyLimit: 10 * 1024 * 1024 // 10MB for JSON bodies
   });
 
-  // CORS support
+  // Strict CORS whitelist: same-origin, localhost/127.0.0.1 on any port, and optional ALLOWED_ORIGINS
+  const allowedOriginsList = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+
   await fastify.register(fastifyCors, {
-    origin: true,
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true);
+      try {
+        const parsed = new URL(origin);
+        const host = parsed.hostname.toLowerCase();
+        if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+          return cb(null, true);
+        }
+        if (allowedOriginsList.includes(origin.toLowerCase()) || allowedOriginsList.includes(host)) {
+          return cb(null, true);
+        }
+        return cb(new Error('CORS not allowed for this origin'), false);
+      } catch {
+        return cb(new Error('Invalid origin'), false);
+      }
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-engine-token', 'Range']
   });
@@ -55,7 +75,7 @@ export async function buildServer() {
     if (!CONFIG.ENGINE_TOKEN) return;
 
     // Health and static files do not require token
-    if (request.url === '/health' || !request.url.startsWith('/api') && !request.url.startsWith('/jobs') && !request.url.startsWith('/uploads') && !request.url.startsWith('/clips')) {
+    if (request.url === '/health' || (!request.url.startsWith('/api') && !request.url.startsWith('/jobs') && !request.url.startsWith('/uploads') && !request.url.startsWith('/clips'))) {
       return;
     }
 
@@ -99,6 +119,7 @@ export async function buildServer() {
 
 export async function startServer() {
   initDataDirectories();
+  recoverInterruptedJobs();
   cleanupStaleJobs();
 
   // Hourly cleanup of jobs older than 24 hours
@@ -134,4 +155,3 @@ export async function startServer() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer();
 }
-

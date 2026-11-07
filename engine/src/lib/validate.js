@@ -7,7 +7,22 @@
 import { z } from 'zod';
 
 /**
- * Validates allowed video source URLs (YouTube or Google Drive)
+ * Validates uploadId format to ensure safety and prevent directory traversal
+ * Format: upload_<timestamp>_<hex/alphanumeric>.<ext>
+ *
+ * @param {string} uploadId
+ * @returns {boolean}
+ */
+export function validateUploadId(uploadId) {
+  if (!uploadId || typeof uploadId !== 'string') return false;
+  if (uploadId.includes('..') || uploadId.includes('/') || uploadId.includes('\\')) {
+    return false;
+  }
+  return /^upload_\d+_[a-zA-Z0-9_-]+\.[a-zA-Z0-9]+$/.test(uploadId);
+}
+
+/**
+ * Validates allowed video source URLs (strictly HTTPS YouTube or Google Drive)
  */
 export const sourceUrlSchema = z.string().trim().refine((url) => {
   if (!url) return false;
@@ -16,6 +31,8 @@ export const sourceUrlSchema = z.string().trim().refine((url) => {
 
   try {
     const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+
     const host = parsed.hostname.toLowerCase();
     const isYoutube = host === 'youtube.com' || host === 'www.youtube.com' || host === 'm.youtube.com' || host === 'youtu.be';
     const isDrive = host === 'drive.google.com';
@@ -24,7 +41,7 @@ export const sourceUrlSchema = z.string().trim().refine((url) => {
     return false;
   }
 }, {
-  message: 'URL must be a valid YouTube link (or 11-char ID) or a public Google Drive link.'
+  message: 'URL must be a valid HTTPS YouTube link (or 11-char ID) or a public Google Drive link.'
 });
 
 /**
@@ -34,23 +51,45 @@ export const createJobSchema = z.object({
   source: z.object({
     type: z.enum(['youtube', 'drive', 'upload']),
     url: z.string().optional(),
-    uploadId: z.string().optional()
+    uploadId: z.string().optional(),
+    filename: z.string().optional()
   }).refine((data) => {
-    if (data.type === 'upload') return Boolean(data.uploadId);
-    return Boolean(data.url);
+    if (data.type === 'upload') {
+      return Boolean(data.uploadId && validateUploadId(data.uploadId));
+    }
+    if (data.type === 'youtube' || data.type === 'drive') {
+      return Boolean(data.url && sourceUrlSchema.safeParse(data.url).success);
+    }
+    return false;
   }, {
-    message: 'Either a valid URL or an uploadId is required.'
+    message: 'Either a valid HTTPS YouTube/Drive URL or a safe uploadId is required.'
   }),
   options: z.object({
     clipCount: z.enum(['5', '10', '15', '20']).or(z.number().int().min(1).max(25)).default(10),
     durationPreset: z.enum(['short', 'standard', 'long']).default('standard'),
-    format: z.enum(['vertical', 'original']).default('vertical'),
-    burnedCaptions: z.boolean().default(true)
+    format: z.enum(['title_video', 'vertical', 'original']).default('title_video'),
+    framing: z.enum(['fill', 'fit']).default('fill'),
+    focusX: z.number().min(0).max(1).default(0.5),
+    censor: z.boolean().default(true),
+    captionSize: z.enum(['small', 'medium', 'large']).default('medium'),
+    quality: z.enum(['fast', 'high']).default('fast'),
+    burnedCaptions: z.boolean().default(true),
+    customRanges: z.array(z.object({
+      start: z.string().or(z.number()),
+      end: z.string().or(z.number()),
+      label: z.string().optional()
+    })).optional().default([])
   }).default({
     clipCount: 10,
     durationPreset: 'standard',
-    format: 'vertical',
-    burnedCaptions: true
+    format: 'title_video',
+    framing: 'fill',
+    focusX: 0.5,
+    censor: true,
+    captionSize: 'medium',
+    quality: 'fast',
+    burnedCaptions: true,
+    customRanges: []
   })
 });
 
@@ -64,6 +103,7 @@ export const windowEvaluationSchema = z.object({
   emotionPayoff: z.coerce.number().min(0).max(25),
   retentionLoop: z.coerce.number().min(0).max(25),
   title: z.string().optional(),
+  onScreenTitle: z.string().optional(),
   description: z.string().optional(),
   hookText: z.string().optional(),
   hashtags: z.array(z.string()).optional(),
@@ -82,6 +122,7 @@ export const batchEvaluationResponseSchema = z.object({
  */
 export const clipPackageSchema = z.object({
   title: z.string().min(3),
+  onScreenTitle: z.string().optional(),
   description: z.string().min(5),
   hookText: z.string().optional().default(''),
   hashtags: z.array(z.string()).default([]),

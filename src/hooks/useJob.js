@@ -12,6 +12,7 @@ export function useJob() {
   const [error, setError] = useState(null);
   const [video, setVideo] = useState(null);
   const [clips, setClips] = useState([]);
+  const [currentClipProgress, setCurrentClipProgress] = useState(null);
 
   const eventSourceRef = useRef(null);
 
@@ -31,6 +32,7 @@ export function useJob() {
         if (state.video) setVideo(state.video);
         if (state.stage) setStage(state.stage);
         if (state.progress) setProgress(state.progress);
+        if (state.currentClipProgress) setCurrentClipProgress(state.currentClipProgress);
         if (Array.isArray(state.clips)) setClips(state.clips);
         if (state.status === 'completed') setStatus('completed');
         else if (state.status === 'failed') {
@@ -78,15 +80,41 @@ export function useJob() {
       try {
         const d = JSON.parse(e.data);
         if (d.clip) {
+          setCurrentClipProgress(prev => (prev?.clipId === d.clip.id ? null : prev));
           setClips(prev => {
             const index = prev.findIndex(c => c.id === d.clip.id);
             if (index >= 0) {
               const updated = [...prev];
-              updated[index] = d.clip;
+              updated[index] = { ...d.clip, isRerendering: false, renderError: null };
               return updated;
             }
             return [...prev, d.clip];
           });
+        }
+      } catch {}
+    });
+
+    es.addEventListener('clip_progress', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        setCurrentClipProgress(d);
+      } catch {}
+    });
+
+    es.addEventListener('clip_rendering', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.clipId) {
+          setClips(prev => prev.map(c => c.id === d.clipId ? { ...c, isRerendering: true, renderError: null } : c));
+        }
+      } catch {}
+    });
+
+    es.addEventListener('clip_failed', (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        if (d.clipId) {
+          setClips(prev => prev.map(c => c.id === d.clipId ? { ...c, rendered: false, isRerendering: false, renderError: d.error } : c));
         }
       } catch {}
     });
@@ -97,30 +125,35 @@ export function useJob() {
         if (Array.isArray(d.clips)) setClips(d.clips);
         setStatus('completed');
         setProgress({ percent: 100, message: 'All clips ready!' });
+        setCurrentClipProgress(null);
         setNotice('');
         es.close();
       } catch {}
     });
 
-    es.addEventListener('error', (e) => {
+    // Server-dispatched job error
+    es.addEventListener('job_error', (e) => {
       try {
         const d = JSON.parse(e.data);
-        setError(d.error || 'Job failed');
+        setError(d.error || 'Job processing failed.');
       } catch {
-        setError('Connection to engine event stream interrupted');
+        setError('Job processing failed.');
       }
       setStatus('failed');
+      setCurrentClipProgress(null);
       es.close();
     });
 
     es.addEventListener('cancelled', () => {
       setStatus('cancelled');
       setProgress({ percent: 0, message: 'Job was cancelled' });
+      setCurrentClipProgress(null);
       es.close();
     });
 
     es.onerror = () => {
-      // EventSource may reconnect automatically unless closed
+      // EventSource automatically reconnects on temporary transport interruptions.
+      // Do NOT flag the job as failed or close here.
     };
   }, []);
 
@@ -219,6 +252,48 @@ export function useJob() {
     }
   };
 
+  // Re-render an individual clip with modified title, framing, or focus
+  const rerenderClip = async (clipId, customOptions = {}) => {
+    if (!jobId) return;
+    setClips(prev => prev.map(c => c.id === clipId ? { ...c, isRerendering: true, renderError: null } : c));
+    try {
+      const res = await defaultEngineClient.rerenderClip(jobId, clipId, customOptions);
+      if (res?.clip) {
+        setClips(prev => prev.map(c => c.id === clipId ? { ...res.clip, isRerendering: false } : c));
+      }
+      return res?.clip;
+    } catch (err) {
+      setClips(prev => prev.map(c => c.id === clipId ? { ...c, isRerendering: false, renderError: err.message } : c));
+      throw err;
+    }
+  };
+
+  // Select a past job from history
+  const selectJob = async (targetJobId) => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+    setJobId(targetJobId);
+    saveLastJobId(targetJobId);
+    setError(null);
+    setNotice('');
+    try {
+      const data = await defaultEngineClient.getJob(targetJobId);
+      if (data) {
+        setVideo(data.video);
+        setClips(data.clips || []);
+        setStatus(data.status);
+        setStage(data.stage);
+        setProgress(data.progress || { percent: 0, message: '' });
+        if (data.status === 'running' || data.status === 'pending') {
+          subscribeToJobEvents(targetJobId);
+        }
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load selected job.');
+    }
+  };
+
   // Cancel running job
   const cancel = async () => {
     if (!jobId) return;
@@ -246,6 +321,7 @@ export function useJob() {
     setNotice('');
     setVideo(null);
     setClips([]);
+    setCurrentClipProgress(null);
   };
 
   return {
@@ -258,10 +334,12 @@ export function useJob() {
     error,
     video,
     clips,
+    currentClipProgress,
     startJob,
     uploadAndStartJob,
+    rerenderClip,
+    selectJob,
     cancel,
     reset
   };
 }
-

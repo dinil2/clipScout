@@ -1,12 +1,26 @@
 /**
- * Jobs Routes: POST /jobs, GET /jobs/:id, GET /jobs/:id/events (SSE), DELETE /jobs/:id
+ * Jobs Routes: POST /jobs, GET /jobs, GET /jobs/:id, GET /jobs/:id/events (SSE), DELETE /jobs/:id, POST /jobs/:id/clips/:clipId/rerender
  */
 
 import { createJobSchema } from '../lib/validate.js';
-import { createJob, getJob, getJobPublicState, registerEventListener, cancelJob } from '../services/jobs.js';
+import { 
+  createJob, 
+  getJob, 
+  getJobPublicState, 
+  registerEventListener, 
+  cancelJob,
+  rerenderClip,
+  listRecentJobs
+} from '../services/jobs.js';
 import { fetchTrendingTopicHashtags } from '../services/hashtags.js';
 
 export default async function jobsRoutes(fastify) {
+  // List recent jobs for history drawer
+  fastify.get('/jobs', async (request, reply) => {
+    const list = listRecentJobs(20);
+    return reply.send({ jobs: list });
+  });
+
   // Create and launch job
   fastify.post('/jobs', async (request, reply) => {
     const parseResult = createJobSchema.safeParse(request.body);
@@ -51,6 +65,19 @@ export default async function jobsRoutes(fastify) {
     registerEventListener(id, reply);
   });
 
+  // Re-render an individual clip (updates title, framing, or layout)
+  fastify.post('/jobs/:id/clips/:clipId/rerender', async (request, reply) => {
+    const { id, clipId } = request.params;
+    const body = request.body || {};
+
+    try {
+      const updatedClip = await rerenderClip(id, clipId, body);
+      return reply.send({ success: true, clip: updatedClip });
+    } catch (err) {
+      return reply.status(400).send({ error: err.message || 'Failed to re-render clip.' });
+    }
+  });
+
   // Cancel job
   fastify.delete('/jobs/:id', async (request, reply) => {
     const { id } = request.params;
@@ -75,7 +102,7 @@ export default async function jobsRoutes(fastify) {
     const result = await fetchTrendingTopicHashtags(queryTopic);
 
     if (!result) {
-      return reply.status(200).send({
+      return reply.send({
         available: false,
         message: 'YouTube Data API key is not configured or returned no results.'
       });
@@ -88,4 +115,3 @@ export default async function jobsRoutes(fastify) {
     });
   });
 }
-

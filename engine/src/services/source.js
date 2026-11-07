@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import { CONFIG } from '../config.js';
 import { runProcess } from '../lib/proc.js';
+import { runYtdlp } from './ytdlp.js';
 import { secondsToClock } from '../lib/timestamps.js';
 
 /**
@@ -101,19 +102,13 @@ export async function resolveRemoteMetadata(url, options = {}) {
 
   const args = [
     '--dump-json',
-    '--no-playlist',
-    '--no-warnings',
-    '--quiet'
+    '--no-playlist'
   ];
-
-  if (CONFIG.YTDLP_COOKIES_FROM_BROWSER) {
-    args.push('--cookies-from-browser', CONFIG.YTDLP_COOKIES_FROM_BROWSER);
-  }
 
   args.push(url);
 
   try {
-    const res = await runProcess('yt-dlp', args, { jobId: options.jobId, timeoutMs: 30000 });
+    const res = await runYtdlp(args, { jobId: options.jobId, timeoutMs: 35000 });
     if (res.exitCode !== 0 || !res.stdout) {
       const errLower = (res.stderr || '').toLowerCase();
 

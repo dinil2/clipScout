@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, Component } from 'react';
 import Header from './components/studio/Header.jsx';
 import Hero from './components/studio/Hero.jsx';
 import SourceCard from './components/studio/SourceCard.jsx';
 import StageProgress from './components/studio/StageProgress.jsx';
 import ClipGrid from './components/studio/ClipGrid.jsx';
 import SettingsDrawer from './components/studio/SettingsDrawer.jsx';
+import RecentJobsDrawer from './components/studio/RecentJobsDrawer.jsx';
 import OfflineState from './components/studio/OfflineState.jsx';
 import Banner from './components/ui/Banner.jsx';
 import Button from './components/ui/Button.jsx';
@@ -13,12 +14,61 @@ import Toast from './components/ui/Toast.jsx';
 import { useEngine } from './hooks/useEngine.js';
 import { useJob } from './hooks/useJob.js';
 import { loadSettings } from './lib/storage.js';
-import { RotateCcw, AlertCircle, ArrowLeft } from 'lucide-react';
+import { RotateCcw, AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 
-export default function App() {
+/**
+ * Top-level Error Boundary to prevent blank white screens
+ */
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Studio uncaught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0B0C10] text-[#F4F5F7] flex flex-col items-center justify-center p-6 text-center antialiased">
+          <div className="max-w-md w-full p-6 rounded-xl bg-[#12141B] border border-[#262A36] shadow-xl flex flex-col items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-bold">Studio Interface Error</h1>
+            <p className="text-xs text-[#A1A7B5] leading-relaxed">
+              {this.state.error?.message || 'An unexpected rendering error occurred in the browser.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-[#FFB020] text-[#1A1203] font-bold rounded-lg hover:bg-[#E59D17] transition-all cursor-pointer text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Reload Studio</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function StudioApp() {
   const { isConnected, isChecking, checkConnection } = useEngine();
   const [options, setOptions] = useState(() => loadSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [recentJobsOpen, setRecentJobsOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
 
   const {
@@ -31,8 +81,11 @@ export default function App() {
     error,
     video,
     clips,
+    currentClipProgress,
     startJob,
     uploadAndStartJob,
+    rerenderClip,
+    selectJob,
     cancel,
     reset
   } = useJob();
@@ -41,12 +94,12 @@ export default function App() {
   const hasClips = clips.length > 0;
   const isFinished = status === 'completed';
 
-  const handleStartUrl = (url) => {
-    startJob(url, options);
+  const handleStartUrl = (url, customRanges = []) => {
+    startJob(url, { ...options, customRanges });
   };
 
-  const handleUploadFile = (file) => {
-    uploadAndStartJob(file, options);
+  const handleUploadFile = (file, customRanges = []) => {
+    uploadAndStartJob(file, { ...options, customRanges });
   };
 
   const showToast = (msg) => {
@@ -60,6 +113,7 @@ export default function App() {
       <Header
         isEngineConnected={isConnected}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenRecent={() => setRecentJobsOpen(true)}
         onReset={reset}
       />
 
@@ -129,6 +183,7 @@ export default function App() {
                     stage={stage}
                     progress={progress}
                     notice={notice}
+                    currentClipProgress={currentClipProgress}
                     onCancel={cancel}
                   />
                 )}
@@ -168,14 +223,16 @@ export default function App() {
                   </Banner>
                 )}
 
-                {/* Clips Grid (appears as soon as clips start rendering!) */}
+                {/* Clips Grid (appears as soon as moments are found and start cutting) */}
                 {(hasClips || (isProcessing && stage === 'cutting_clips')) && (
                   <ClipGrid
                     clips={clips}
                     jobId={jobId}
                     isRendering={isProcessing}
+                    currentClipProgress={currentClipProgress}
                     targetClipCount={Number(options.clipCount) || 10}
                     onShowToast={showToast}
+                    onRerenderClip={rerenderClip}
                     className="mt-4"
                   />
                 )}
@@ -202,6 +259,14 @@ export default function App() {
         onSettingsSaved={(newSettings) => setOptions(newSettings)}
       />
 
+      {/* Recent Jobs Drawer */}
+      <RecentJobsDrawer
+        isOpen={recentJobsOpen}
+        onClose={() => setRecentJobsOpen(false)}
+        currentJobId={jobId}
+        onSelectJob={(id) => selectJob(id)}
+      />
+
       {/* Toast Feedback */}
       <Toast
         message={toastMessage}
@@ -209,5 +274,13 @@ export default function App() {
       />
 
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <StudioApp />
+    </ErrorBoundary>
   );
 }

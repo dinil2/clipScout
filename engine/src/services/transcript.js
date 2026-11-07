@@ -10,6 +10,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { CONFIG } from '../config.js';
 import { runProcess } from '../lib/proc.js';
+import { runYtdlp, downloadAudioOnly } from './ytdlp.js';
 import { parseVtt } from '../lib/vtt.js';
 import { extractAudioTrack, transcribeAudioWithChunking } from './whisper.js';
 
@@ -41,18 +42,12 @@ export async function fetchYoutubeCaptionsViaYtdlp(url, tempBaseDir, jobId) {
     '--sub-lang', 'en.*,en',
     '--sub-format', 'vtt',
     '--skip-download',
-    '--no-warnings',
-    '--quiet',
-    '-o', outTemplate
+    '-o', outTemplate,
+    url
   ];
 
-  if (CONFIG.YTDLP_COOKIES_FROM_BROWSER) {
-    manualArgs.push('--cookies-from-browser', CONFIG.YTDLP_COOKIES_FROM_BROWSER);
-  }
-  manualArgs.push(url);
-
   try {
-    await runProcess('yt-dlp', manualArgs, { jobId, timeoutMs: 25000 });
+    await runYtdlp(manualArgs, { jobId, timeoutMs: 30000 });
   } catch {}
 
   // Check if any .vtt file was written
@@ -65,18 +60,12 @@ export async function fetchYoutubeCaptionsViaYtdlp(url, tempBaseDir, jobId) {
       '--sub-lang', 'en.*,en',
       '--sub-format', 'vtt',
       '--skip-download',
-      '--no-warnings',
-      '--quiet',
-      '-o', outTemplate
+      '-o', outTemplate,
+      url
     ];
 
-    if (CONFIG.YTDLP_COOKIES_FROM_BROWSER) {
-      autoArgs.push('--cookies-from-browser', CONFIG.YTDLP_COOKIES_FROM_BROWSER);
-    }
-    autoArgs.push(url);
-
     try {
-      await runProcess('yt-dlp', autoArgs, { jobId, timeoutMs: 25000 });
+      await runYtdlp(autoArgs, { jobId, timeoutMs: 30000 });
     } catch {}
 
     vttFiles = fs.readdirSync(tempBaseDir).filter(f => f.startsWith(path.basename(outTemplate)) && f.endsWith('.vtt'));
@@ -162,26 +151,8 @@ export async function getOrExtractTranscript(sourceMeta, options = {}) {
     if (sourceMeta.sourceType === 'local' && sourceMeta.filePath && fs.existsSync(sourceMeta.filePath)) {
       audioPath = await extractAudioTrack(sourceMeta.filePath, tempAudio, jobId);
     } else {
-      // Remote source (YouTube or Drive): download audio with yt-dlp
-      const ytdlpAudioArgs = [
-        '-x',
-        '--audio-format', 'mp3',
-        '--audio-quality', '64k',
-        '--no-warnings',
-        '--quiet',
-        '-o', tempAudio
-      ];
-
-      if (CONFIG.YTDLP_COOKIES_FROM_BROWSER) {
-        ytdlpAudioArgs.push('--cookies-from-browser', CONFIG.YTDLP_COOKIES_FROM_BROWSER);
-      }
-      ytdlpAudioArgs.push(sourceMeta.webpageUrl || sourceMeta.url);
-
-      const dlRes = await runProcess('yt-dlp', ytdlpAudioArgs, { jobId, timeoutMs: 180000 });
-      if (dlRes.exitCode !== 0 || !fs.existsSync(tempAudio)) {
-        throw new Error(`Failed to download audio for transcription: ${dlRes.stderr || 'yt-dlp error'}`);
-      }
-      audioPath = tempAudio;
+      // Remote source (YouTube or Drive): download audio safely with yt-dlp
+      audioPath = await downloadAudioOnly(sourceMeta.webpageUrl || sourceMeta.url, tempAudio, { jobId });
     }
 
     const whisperResult = await transcribeAudioWithChunking(

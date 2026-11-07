@@ -1,9 +1,10 @@
 import React from 'react';
-import { Scissors, Settings, Wifi, WifiOff } from 'lucide-react';
+import { Scissors, Settings, Wifi, WifiOff, History } from 'lucide-react';
 
 export default function Header({
   isEngineConnected = true,
   onOpenSettings,
+  onOpenRecent,
   onReset
 }) {
   return (
@@ -28,8 +29,22 @@ export default function Header({
           </div>
         </button>
 
-        {/* Right side: Status pill + Settings */}
-        <div className="flex items-center gap-3">
+        {/* Right side: Recent Jobs + Status pill + Settings */}
+        <div className="flex items-center gap-2.5">
+          {/* History Button */}
+          {onOpenRecent && (
+            <button
+              type="button"
+              onClick={onOpenRecent}
+              aria-label="Recent Podcast Jobs"
+              title="Recent Podcast Jobs"
+              className="h-9 px-2.5 rounded-control border border-border bg-surface hover:bg-surface-2 text-muted hover:text-text flex items-center gap-1.5 transition-colors cursor-pointer text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              <History className="w-3.5 h-3.5 text-accent" />
+              <span className="hidden sm:inline">Recent</span>
+            </button>
+          )}
+
           {/* Status Pill */}
           <div
             className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
@@ -57,7 +72,8 @@ export default function Header({
             type="button"
             onClick={onOpenSettings}
             aria-label="Studio Settings"
-            className="w-10 h-10 rounded-control border border-border bg-surface hover:bg-surface-2 text-muted hover:text-text flex items-center justify-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            title="Studio Settings"
+            className="w-9 h-9 rounded-control border border-border bg-surface hover:bg-surface-2 text-muted hover:text-text flex items-center justify-center transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -66,4 +82,3 @@ export default function Header({
     </header>
   );
 }
-
